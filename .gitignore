@@ -39,5 +39,4 @@ phone/local.properties
 *.apk
 .idea/
 /archives
-/claude-files
-/machine
+/data

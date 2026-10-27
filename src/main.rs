@@ -1,57 +1,161 @@
-//! project
-//!
-//!
-//! TODO: Core application.
-//! 2026-10-24 18:51
-//! [ ] Use ratatui
-//! [ ] Use serde for persistence.
-//! ## Modules
-//! 2026-10-24 18:52
-//! [ ] Make todo list
-//! [ ] 
+use std::fs;
+use std::io;
+use std::io::Write;
+use serde::{Deserialize, Serialize};
 
-// TODO: The todo of my todo.
-//
-// use std::fs;
-//
-// trait Entry: Serialize + DeserializeOwned + Clone {
-//     const FILE: &'static str; // "todos.json", "pages.json"
-//     fn id(&self) -> u64;
-//     fn title(&self) -> &str;
-//     fn body(&self) -> &str {
-//         "" // default: nothing extra to search
-//     }
-// }
-//
-// #[derive(Clone, Serialize, Deserialize)]
-// struct Todo {
-//     id: u64,
-//     header: String,
-//     is_done: bool,
-// }
-//
-// impl Entry for Todo {
-//     const FILE: &'static str = "todos.json";
-//     fn id(&self) -> u64 {
-//         self.id
-//     }
-//     fn title(&self) -> &str {
-//         &self.header
-//     }
-// }
+enum Command {
+    List,
+    Add,
+    Rm,
+    Done,
 
-use ratatui;
+}
+#[derive(Clone, Serialize, Deserialize)]
+struct Todo {
+    id: u64,
+    header: String,
+    is_done: bool,
+    // date added,
+}
 
-struct App {
-    modules: 
+#[derive(Clone, Serialize, Deserialize)]
+enum Kind {
+    Added,
+    Removed,
+    Done,
+}
+
+#[derive(Clone, Serialize, Deserialize)]
+struct Event {
+    id: u64,       // this event's own id, unique forever
+    kind: Kind,    // what happened
+    todo_id: u64,  // which todo it happened to
+    header: String // the title (only meaningful for Added)
+}
+
+
+fn read_line() -> String {
+    let mut input = String::new();
+    io::stdin()
+        .read_line(&mut input)
+        .expect("Failed to read line");
+    input.trim().to_string()
+}
+
+fn log_event(event: &Event) {
+    let line = serde_json::to_string(event).expect("Failed to turn event into text");
+    let mut file = fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open("history.jsonl")
+        .expect("Failed to open history.jsonl");
+    writeln!(file, "{}", line).expect("Failed to write event");
+}
+
+fn load_log() -> Vec<Event> {
+    match fs::read_to_string("history.jsonl") {
+        Ok(text) => text
+            .lines()
+            .map(|line| serde_json::from_str(line).expect("bad line in history.jsonl"))
+            .collect(),
+        Err(_) => Vec::new(),
+    }
+}
+
+fn main_menu() -> char {
+    read_line().chars().next().unwrap_or(' ')
+}
+
+fn save(todos: &Vec<Todo>) {
+    let text = serde_json::to_string_pretty(todos).expect("Failed to turn todos into text");
+    fs::write("todos.json", text).expect("Failed to write todos.json");
+}
+
+fn load() -> Vec<Todo> {
+    match fs::read_to_string("todos.json") {
+        Ok(text) => serde_json::from_str(&text).expect("todos.json is corrupted"),
+        Err(_) => Vec::new(),
+    }
+}
+
+impl Todo {
+    fn new(id: u64, header: String) -> Todo {
+        Todo { id, header, is_done: false }
+    }
 }
 
 fn main() {
-    let mut app = App::new();
-    let mut terminal = ratatui::init(); // also installs a panic hook that restores the terminal
-    let result = app.run(&mut terminal);
-    ratatui::restore();
-    if let Err(e) = result {
-        eprintln!("error: {e}");
+    println!("Program starts:");
+    println!("q, quits,");
+    println!("1, list todos,");
+    println!("2, add todo,");
+    println!("3, rm todo,");
+    println!("4, mark todo done");
+
+    // let mut todos: Vec<Todo> = Vec::new();
+    let mut todos = load();
+    let mut log = load_log();
+
+    loop {
+         let command = match main_menu() {
+             'q' => break,
+             '1' => Command::List,
+             '2' => Command::Add,
+             '3' => Command::Rm,
+             '4' => Command::Done,
+             _ => {
+                 println!("Unknown choice, try again.");
+                 continue;
+             }
+         };
+        match command {
+            Command::Add => {
+                println!("Title?");
+                let header = read_line();
+            
+                let id = log.len() as u64 + 1;
+                let event = Event { id, kind: Kind::Added, todo_id: id, header: header.clone() };
+                log_event(&event);
+                log.push(event);
+            
+                todos.push(Todo::new(id, header));
+                save(&todos);
+                println!("Added.");
+            }
+            Command::List => {
+                for todo in &todos {
+                    println!("{}. [{}] {}", todo.id, if todo.is_done { "x" } else { " " }, todo.header);
+                }
+            }
+            Command::Done => println!("(done: not written yet)"),
+            Command::Rm => {
+                println!("Which id?");
+                let todo_id: u64 = match read_line().parse() {
+                    Ok(n) => n,
+                    Err(_) => {
+                        println!("That is not a number.");
+                        continue;
+                    }
+                };
+            
+                match todos.iter().position(|t| t.id == todo_id) {
+                    Some(index) => {
+                        let event = Event {
+                            id: log.len() as u64 + 1,
+                            kind: Kind::Removed,
+                            todo_id,
+                            header: String::new(),
+                        };
+                        log_event(&event);
+                        log.push(event);
+            
+                        todos.remove(index);
+                        save(&todos);
+                        println!("Removed.");
+                    }
+                    None => println!("No todo with that id."),
+                }
+            }
+        }
     }
 }
