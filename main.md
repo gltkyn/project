@@ -12,3 +12,11 @@ ill read and use them. They are usable.
 
 reading the code of ai.
 saving it to claude/
+
+## 2026-11-02 05:17
+
+This section should be as clean as it can get.
+
+## 2026-11-03 04:56
+
+Deepseek was asked to produce a code. It is going fast for now.
