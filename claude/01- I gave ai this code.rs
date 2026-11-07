@@ -1,14 +1,13 @@
-se std::fs;
+use serde::{Deserialize, Serialize};
+use std::fs;
 use std::io;
 use std::io::Write;
-use serde::{Deserialize, Serialize};
 
 enum Command {
     List,
     Add,
     Rm,
     Done,
-
 }
 #[derive(Clone, Serialize, Deserialize)]
 struct Todo {
@@ -27,12 +26,11 @@ enum Kind {
 
 #[derive(Clone, Serialize, Deserialize)]
 struct Event {
-    id: u64,       // this event's own id, unique forever
-    kind: Kind,    // what happened
-    todo_id: u64,  // which todo it happened to
-    header: String // the title (only meaningful for Added)
+    id: u64,        // this event's own id, unique forever
+    kind: Kind,     // what happened
+    todo_id: u64,   // which todo it happened to
+    header: String, // the title (only meaningful for Added)
 }
-
 
 fn read_line() -> String {
     let mut input = String::new();
@@ -80,7 +78,11 @@ fn load() -> Vec<Todo> {
 
 impl Todo {
     fn new(id: u64, header: String) -> Todo {
-        Todo { id, header, is_done: false }
+        Todo {
+            id,
+            header,
+            is_done: false,
+        }
     }
 }
 
@@ -97,34 +99,44 @@ fn main() {
     let mut log = load_log();
 
     loop {
-         let command = match main_menu() {
-             'q' => break,
-             '1' => Command::List,
-             '2' => Command::Add,
-             '3' => Command::Rm,
-             '4' => Command::Done,
-             _ => {
-                 println!("Unknown choice, try again.");
-                 continue;
-             }
-         };
+        let command = match main_menu() {
+            'q' => break,
+            '1' => Command::List,
+            '2' => Command::Add,
+            '3' => Command::Rm,
+            '4' => Command::Done,
+            _ => {
+                println!("Unknown choice, try again.");
+                continue;
+            }
+        };
         match command {
             Command::Add => {
                 println!("Title?");
                 let header = read_line();
-            
+
                 let id = log.len() as u64 + 1;
-                let event = Event { id, kind: Kind::Added, todo_id: id, header: header.clone() };
+                let event = Event {
+                    id,
+                    kind: Kind::Added,
+                    todo_id: id,
+                    header: header.clone(),
+                };
                 log_event(&event);
                 log.push(event);
-            
+
                 todos.push(Todo::new(id, header));
                 save(&todos);
                 println!("Added.");
             }
             Command::List => {
                 for todo in &todos {
-                    println!("{}. [{}] {}", todo.id, if todo.is_done { "x" } else { " " }, todo.header);
+                    println!(
+                        "{}. [{}] {}",
+                        todo.id,
+                        if todo.is_done { "x" } else { " " },
+                        todo.header
+                    );
                 }
             }
             Command::Rm => {
@@ -136,7 +148,7 @@ fn main() {
                         continue;
                     }
                 };
-            
+
                 match todos.iter().position(|t| t.id == todo_id) {
                     Some(index) => {
                         let event = Event {
@@ -147,14 +159,14 @@ fn main() {
                         };
                         log_event(&event);
                         log.push(event);
-            
+
                         todos.remove(index);
                         save(&todos);
                         println!("Removed.");
                     }
                     None => println!("No todo with that id."),
                 }
-            }           
+            }
             Command::Done => println!("(done: not written yet)"),
         }
     }

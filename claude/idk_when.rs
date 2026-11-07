@@ -1,198 +1,17 @@
-# The whole code
-
-Here it is — `Cargo.toml`, the panel, and `src/main.rs`. The file is long but every section is either kept verbatim from your original or replaced with the code from my last message. Comments mark the changed areas so you can diff against your old file.
-
----
-
-## `Cargo.toml`
-
-```toml
-[package]
-name = "dortyuzlu"
-version = "0.1.0"
-edition = "2021"
-
-[[bin]]
-name = "dortyuzlu"
-path = "src/main.rs"
-
-[[bin]]
-name = "panel"
-path = "src/bin/panel.rs"
-
-[dependencies]
-chrono      = { version = "0.4", features = ["serde"] }
-ratatui     = "0.29"
-crossterm   = "0.28"
-serde       = { version = "1", features = ["derive"] }
-serde_json  = "1"
-axum        = "0.7"
-tokio       = { version = "1", features = ["rt-multi-thread", "net", "macros"] }
-```
-
----
-
-## `src/bin/panel.rs`
-
-```rust
-//! Browser panel: type, press Enter. Appends to inbox.jsonl; the TUI drains it.
-//!
-//!   cargo run --bin panel
-//!   → http://127.0.0.1:3000
-
-use std::io::Write;
-use std::path::PathBuf;
-
-use axum::{
-    extract::Form,
-    response::Html,
-    routing::{get, post},
-    Router,
-};
-use serde::Deserialize;
-
-#[derive(Deserialize)]
-struct Entry {
-    module: String,
-    text: String,
-}
-
-fn data_dir() -> PathBuf {
-    let dir = match std::env::var_os("DORTYUZLU_DIR") {
-        Some(d) => PathBuf::from(d),
-        None => match std::env::var_os("HOME") {
-            Some(h) => PathBuf::from(h).join("dortyuzlu"),
-            None => PathBuf::from("."),
-        },
-    };
-    let _ = std::fs::create_dir_all(&dir);
-    dir
-}
-
-async fn home() -> Html<&'static str> {
-    Html(include_str!("panel.html"))
-}
-
-async fn add(Form(e): Form<Entry>) -> Html<String> {
-    let at = chrono::Local::now().format("%Y-%m-%d %H:%M").to_string();
-    let line = serde_json::json!({
-        "module": e.module,
-        "text": e.text,
-        "at": at,
-    });
-    let path = data_dir().join("inbox.jsonl");
-    let result = (|| -> std::io::Result<()> {
-        let mut f = std::fs::OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(&path)?;
-        writeln!(f, "{}", line)?;
-        Ok(())
-    })();
-    let body = match result {
-        Ok(()) => format!("<p>Queued: <code>{}</code></p>", escape(&e.text)),
-        Err(err) => format!("<p>Could not queue: {err}</p>"),
-    };
-    Html(format!("{body}<p><a href=\"/\">back</a></p>"))
-}
-
-fn escape(s: &str) -> String {
-    s.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;")
-}
-
-#[tokio::main]
-async fn main() {
-    let app = Router::new().route("/", get(home)).route("/add", post(add));
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:3000")
-        .await
-        .expect("bind :3000");
-    println!("panel on http://127.0.0.1:3000");
-    axum::serve(listener, app).await.expect("serve");
-}
-```
-
----
-
-## `src/bin/panel.html`
-
-```html
-<!doctype html>
-<html lang="en">
-  <head>
-    <meta charset="utf-8" />
-    <title>dortyuzlu</title>
-    <style>
-      body {
-        font-family: system-ui, sans-serif;
-        max-width: 42rem;
-        margin: 2rem auto;
-        padding: 0 1rem;
-        color: #222;
-      }
-      h1 {
-        font-weight: 600;
-      }
-      select,
-      textarea,
-      button {
-        width: 100%;
-        box-sizing: border-box;
-        padding: 0.5rem;
-        margin: 0.25rem 0;
-        font: inherit;
-      }
-      textarea {
-        min-height: 7rem;
-      }
-      button {
-        cursor: pointer;
-      }
-      code {
-        background: #f0f0f0;
-        padding: 0.1rem 0.3rem;
-        border-radius: 3px;
-      }
-      p {
-        color: #555;
-      }
-    </style>
-  </head>
-  <body>
-    <h1>dortyuzlu</h1>
-    <p>
-      A plain line is a diary entry. <code>todo:</code> makes a todo.
-      <code>14:00-15:30 Title</code> makes an agenda event.
-    </p>
-    <form method="post" action="/add">
-      <select name="module">
-        <option value="diary">diary</option>
-        <option value="todo">todo</option>
-        <option value="timetable">timetable</option>
-      </select>
-      <textarea name="text" required autofocus></textarea>
-      <button type="submit">queue</button>
-    </form>
-  </body>
-</html>
-```
-
----
-
-## `src/main.rs`
-
-```rust
 //! project
 //!
 //! A modular, interconnected life-management system built with Rust and Ratatui.
+//! Activities share underlying data and connect tasks, habits, diary entries,
+//! scheduling, and completion history around a central timeline.
 //!
-//! Two AIs, both local and both ask-first:
-//!   Curator    reads todos, habits and the diary. Proposes structural fixes.
-//!   Companion  reads the diary and answers questions in prose.
-//!
-//! Diary is the front door: lines with "todo:", "finished X", "HH:MM-HH:MM X"
-//! or "title N" become *intents*; the Curator turns them into yes/no questions.
-//!
-//! Modules toggle from the settings tab. Diary, AI and settings are always on.
+//! Dependencies (Cargo.toml):
+//!   serde = { version = "1", features = ["derive"] }
+//!   serde_json = "1"
+//!   chrono = "0.4"
+//!   ratatui = "0.29"      (0.28 or newer)
+//!   (the browser panel, src/bin/panel.rs, also needs axum and tokio; see Cargo.toml)
+//! Run the tests with `cargo test`. Data lives in ~/dortyuzlu (or $DORTYUZLU_DIR);
+//! files from the folder you ran it in before are copied there on first start.
 //!
 //! ============================================================
 //! HOW THE CODE IS BUILT (read this before adding a tab)
@@ -201,26 +20,227 @@ async fn main() {
 //! Entry      what is stored: id, title, optional body and tags.
 //! Store<T>   one JSON file of entries. Load, save, ids. Tabs on the same file share one.
 //! Record     a kind of entry: how it is typed in, shown, and its special keys.
-//! ListModule a generic tab for any Record.
-//! Module     what the app sees of a tab.
-//! Request    a tab asking another tab to press a key.
-//! Advisor    the Curator half: proposes actions.
-//! Companion  the narrative half: reads the diary, answers in prose.
+//! ListModule a generic tab for any Record: add / edit / delete, views, tag filter,
+//!            search and day-bar blocks. The "lens" number lets several tabs show
+//!            one file differently (todo / done / cubes all show todos.json).
+//! Module     what the app sees of a tab. ListModule, CalendarModule and AiModule
+//!            implement it.
+//! Request    a tab asking another tab to press a key. How approved AI suggestions run.
+//! Advisor    anything that proposes actions to the AI tab (built-in Rules, later a
+//!            local model).
 //!
-//! A new tab = `impl Entry` + `impl Record` for its struct, plus one line in App::new
-//! (and one in ALL_MODULES so settings can toggle it).
+//! A new tab = `impl Entry` + `impl Record` for its struct, plus one line in App::new.
 //!
 //! Quick entry, in every "(#tag)" prompt:  Buy milk #errands @quick
 //!   #word  is a tag.   @group  (todos only) is main, quick, steady, resurface,
 //!   secondary or serotonin.   Search with "#tag" to find by tag.
 //!
-//! Diary intents (the front door):
-//!   todo: buy milk @quick      → proposes adding a todo
-//!   finished laundry           → proposes marking a todo done
-//!   smoked 2                   → proposes counting a habit
-//!   14:00-15:30 Dentist #h     → proposes an agenda event
-//! Everything still asks before it runs.
+//! ============================================================
+//! DONE: — IMPLEMENTED IN THE LAST CODE (NOT YET VERIFIED)
+//! ============================================================
+//!
+//! NOTE: nothing below has been compiled or run yet. Run `cargo check`, then
+//! `cargo test`, and fix what the compiler finds before trusting it.
+//!
+//! CORE APPLICATION
+//! [x] Ratatui terminal interface.
+//! [x] Modular architecture using a shared Module interface.
+//! [x] Tab-based navigation between modules.
+//! [x] Shared logging system (history.jsonl; every tab writes to it).
+//! [x] JSON-based persistent storage (written to a temp file and renamed, and a
+//!     file that can't be read is kept as <name>.corrupt instead of crashing).
+//! [x] Fuzzy search across all tabs, with #tag search.
+//! [x] Shared interface for listing items, viewing details, and actions.
+//! [x] Generic Record / ListModule: add, edit, delete, views and tag filter are
+//!     written once for every tab instead of once per tab.
+//! [x] Lists can be grouped under headings.
+//!
+//! TODO TAB, GROUPS AND FOCUS
+//! [x] Todos belong to a group: main, quick (easily done), steady (needs a little
+//!     work every day), resurface (comes back every day), secondary, serotonin.
+//! [x] The todo tab opens on "focus" (hides secondary and serotonin) and says how
+//!     many are hidden. `v` cycles focus / all / one group at a time.
+//! [x] Todos older than a week show their age.
+//! [x] Resurface todos reopen themselves the day after you finish them.
+//! [x] Done tab: newest first, with views today / week / all.
+//!
+//! TAGS
+//! [x] #tags on todos, habits, dailies, dictionary pages, events and diary lines.
+//! [x] `t` filters a tab by one tag. Search "#tag" finds a tag across all tabs.
+//!
+//! CUBES TAB
+//! [x] Open todos shown as blocks with a size (m) and a time on the timeline (s).
+//! [x] Placed cubes are painted on the day bar for their day (green).
+//!
+//! DAILY TAB
+//! [x] Dailies repeat on chosen weekdays: daily, weekdays, weekend, mon-fri, mon,wed...
+//! [x] Duration and specifications; can be put on the day bar at a start time (s).
+//! [x] Crossing midnight works (sleep 23:00 for 7 hours shows on both days).
+//! [x] Today's dailies are listed first; ticking one off counts for today only.
+//!
+//! HABIT TAB (BUILD AND QUIT)
+//! [x] Habits to build ("at least N a day") and habits to quit ("at most N a day").
+//! [x] + counts one today, - takes one back; missed days count as zero by themselves.
+//! [x] Streak, best streak, last 30 days, last 14 days at a glance.
+//!
+//! AGENDA, CALENDAR AND DAY BAR
+//! [x] Agenda: upcoming events by day, views upcoming / past / all.
+//! [x] Events can run past midnight (end earlier than start = ends the next day).
+//! [x] Calendar: a month grid; the day bar shows the SELECTED day.
+//! [x] Day bar: 24 hours, passed time shaded, planned time coloured by kind
+//!     (event, daily, cube), "now" marked, legend underneath.
+//!
+//! BROWSER PANEL (ADDON 1)
+//! [x] `cargo run --bin panel` serves http://localhost:3000; type there, press Enter.
+//!     Plain = diary, `todo:` = todo (#tags @group work), `timetable: [date] HH:MM-HH:MM title`
+//!     = agenda event (unreadable ones become diary notes tagged #timetable).
+//! [x] The panel only appends to inbox.jsonl; the TUI is the single writer of its
+//!     data, drains the inbox every 2 s and at start, keeps the typing time.
+//!     Refused lines are kept in inbox.rejected.jsonl.
+//!
+//! DIARY
+//! [x] One line per Enter press, timestamped, grouped by day, #words become tags.
+//!
+//! AI TAB (ASKS BEFORE EVERY STEP)
+//! [x] The assistant only proposes; every proposal waits for your yes or no.
+//! [x] Yes runs the action like a key press on the target tab and logs it; No is
+//!     remembered and never asked again. proposals.json keeps every answer.
+//! [x] Built-in rules: ask to mark a cube done once its time is over; ask to move a
+//!     main todo to secondary after 30 days.
+//! [x] Advisor trait: the one place a local model plugs in. Advisors get a read-only
+//!     View of the todos and the diary.
+//!
+//! RBIP, THE RULE-BASED INTENT PARSER (LAYER 1, SECTION 13a)
+//! [x] The AI reads every diary line, splits it into sentences and tags each one past
+//!     or present (a small word list that ships with the app).
+//! [x] A shipped library with one pattern, "add todo <todo>.": a diary sentence like
+//!     "add todo go walk." makes the AI ask `Add todo "go walk"?`; yes adds the todo,
+//!     no is remembered. It never adds anything on its own.
+//!
+//! ============================================================
+//! TODO: — PLANNED FEATURES
+//! ============================================================
+//!
+//! 0. CHECK THE LAST CODE FIRST
+//! [ ] Build the panel too (cargo run --bin panel) and try it with the TUI open.
+//! [ ] Import the old ~/dortyuzlu/<module>/<date>/*.txt / *.diary files the first panel wrote.
+//! [ ] Addon 2: not decided yet.
+//! [ ] Run cargo check and fix compilation errors (nothing here has been compiled).
+//! [ ] Run cargo test; add tests for the day-bar painting and the AI flow.
+//! [ ] Try a real day: sleep across midnight, a habit streak, a resurfacing todo.
+//!
+//! 1. TIMELINE AND ACTIVITY CUBES
+//! [ ] Build the main timeline as the central application view.
+//! [ ] Display activity names and relevant information inside blocks.
+//! [ ] Support overlapping activities and scheduling conflicts.
+//! [ ] Preserve historical timelines for past days (the bar shows past days'
+//!     plans, but not what really happened).
+//! [ ] Cubes that cross midnight listed on both days in the cubes tab.
+//!
+//! 2. DRAG-AND-DROP INTERACTION
+//! [ ] Support mouse interaction with timeline blocks.
+//! [ ] Drag activities to different times.
+//! [ ] Resize blocks to change activity duration.
+//! [ ] Move activities between dates.
+//! [ ] Update the underlying schedule when a block moves.
+//! [ ] Display clear feedback when activities conflict.
+//!
+//! 3. AUTOMATIC COMPLETION AND TIME TRACKING
+//! [ ] Check the current time when the application starts (ticks run now; they
+//!     only reopen resurface todos and ask the AI questions).
+//! [ ] Detect activities whose scheduled end times have passed (done for cubes:
+//!     the AI asks; not yet for events and dailies).
+//! [ ] Apply each activity's completion rules; automatically move eligible
+//!     activities from Todo to Done without asking, when the user allows it.
+//! [ ] Process missed transitions after the application was closed.
+//! [ ] Avoid completing the same activity more than once.
+//! [ ] Distinguish time-based completion from activities requiring manual
+//!     confirmation.
+//! [ ] Handle activities crossing midnight.
+//!
+//! Example:
+//! Sleep is scheduled from 23:00 on June 3 until 06:00 on June 4.
+//! When the app opens after 06:00 on June 4, it recognizes the end
+//! of the sleep period and moves that occurrence to Done, preserving
+//! its original scheduled date and times.
+//!
+//! 4. INTERCONNECTED MODULES
+//! [ ] Establish a shared underlying activity model (todos, cubes, dailies and
+//!     events are still four separate kinds of entry).
+//! [ ] Ensure modules reference shared activities instead of duplicating them.
+//! [ ] Define how changes in one module affect other modules.
+//! [ ] Connect Todo and Done to the timeline (done through cubes).
+//! [ ] Connect Agenda and Calendar to shared scheduling data (they share
+//!     events.json; dailies and cubes are not in the agenda yet).
+//! [ ] Connect Habit tracking to scheduled and completed activities (a daily
+//!     that is ticked off should count a habit).
+//! [ ] Allow diary entries to reference relevant activities when useful.
+//! [ ] Keep module views synchronized when an activity changes.
+//! [ ] Maintain consistent IDs, dates, and history across modules.
+//!
+//! 5. HABIT SYSTEM
+//! [ ] Weekly targets and schedules (three times a week, not every day).
+//! [ ] Time-of-day targets, such as waking at 06:00 (record the actual time).
+//! [ ] Distinguish skipped habits from missed ones.
+//! [ ] Connect habits to relevant timeline activities.
+//! [ ] Weekly consistency view.
+//!
+//! 6. TODO LIST CALM
+//! [ ] Snooze a todo until a date, so it leaves the list and comes back.
+//! [ ] A tag / group overview screen with counts.
+//! [ ] Bulk actions: move all quick todos, tag several at once.
+//! [ ] Show only what fits today by comparing cube sizes with free time.
+//!
+//! 7. LOCAL AI THAT KNOWS YOUR WRITING
+//! [ ] RBIP layer 2: more tags than past/present (can, could, need to, negation, time
+//!     words like "tomorrow") and more library patterns, one row each in LIBRARY.
+//! [ ] Tell the AI tab's user about new questions while typing in the diary.
+//! [ ] Run a local, non-commercial model on the machine; nothing leaves it.
+//! [ ] Train or prompt it on the diary, todos and history.jsonl (your own writing).
+//! [ ] Implement Advisor for it, so its ideas arrive as yes/no questions.
+//! [ ] Learn from proposals.json (every yes and no is a labelled example).
+//! [ ] More rules and ideas: suggest groups and tags for new todos, suggest a time
+//!     slot for a cube, notice a habit slipping, draft diary lines from the day.
+//! [ ] A "why" the AI can explain, and a way to tell it "never ask about this".
+//!
+//! 8. DIARY INTEGRATION
+//! [ ] Associate diary entries with dates and relevant activities.
+//! [ ] Review diary entries alongside the timeline.
+//! [ ] Optionally link diary entries to habits or tasks.
+//! [ ] Edit or delete a diary line.
+//!
+//! 9. PERSISTENCE AND RELIABILITY
+//! [ ] Encrypt data at rest ("blackbox").
+//! [ ] Recover correctly after closing and restarting the app.
+//! [ ] Prevent duplicate completion records.
+//! [ ] Test persistence and automatic state transitions.
+//! [ ] Split the single file into modules (core, records, tabs, ui) once it settles.
+//!
+//! 10. FINAL INTEGRATION AND TESTING
+//! [ ] Define the responsibilities and data relationships of all modules.
+//! [ ] Implement central timeline and cube rendering.
+//! [ ] Implement drag-and-drop scheduling.
+//! [ ] Implement automatic completion rules.
+//! [ ] Test interactions across connected modules.
+//! [ ] Test realistic daily usage, including sleep, habits, and missed schedules.
+//!
+//! ============================================================
+//! ARCHITECTURAL PRIORITY
+//! ============================================================
+//!
+//! Design the shared activity data model before the main timeline view.
+//! Define what an activity is, when it starts and ends, how it repeats,
+//! and what causes it to move from Todo to Done. Today a todo (with a cube
+//! size and slot), a daily and an event each store their own time; the next
+//! step is one shared "activity" they all point to.
+//!
+//! The timeline and all modules should operate on the same underlying
+//! data rather than becoming separate systems that must be synchronized.
 
+// MAP OF THIS FILE. 1 small helpers (dates, tags) | 2 storage (Entry, Store, Logger) | 3 fuzzy
+// finder | 4 Module (what a tab is) | 5 Record + ListModule (the generic tab) | 6-11 the kinds of
+// entry: todo, habit, daily, dictionary page, calendar event, diary line | 12 calendar tab | 13 AI
+// tab | 14 the ratatui screen and key handling | tests at the end.
 use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::fs;
@@ -244,30 +264,37 @@ use serde::{de::DeserializeOwned, Deserialize, Serialize};
 // 1. SMALL HELPERS: dates, times, tags
 // ===========================================================================
 
+// Every date is stored as text in this shape, e.g. 2026-10-24, so the JSON files stay readable.
 const DATE_FMT: &str = "%Y-%m-%d";
 
+// Today's date from this computer's clock. Everything that means "today" goes through here.
 fn today() -> NaiveDate {
     Local::now().date_naive()
 }
 
+// Today as stored text (see DATE_FMT).
 fn today_text() -> String {
     today().format(DATE_FMT).to_string()
 }
 
+// "2026-10-24" -> a date, or None when the text isn't one.
 fn parse_date(text: &str) -> Option<NaiveDate> {
     NaiveDate::parse_from_str(text.trim(), DATE_FMT).ok()
 }
 
+// "09:30" or "9:30" -> minutes since midnight
 fn minutes_of(text: &str) -> Option<u32> {
     NaiveTime::parse_from_str(text.trim(), "%H:%M")
         .ok()
         .map(|t| t.hour() * 60 + t.minute())
 }
 
+// Minutes since midnight -> "09:30". Wraps at 24 hours, so 1500 shows as 01:00.
 fn clock(minutes: u32) -> String {
     format!("{:02}:{:02}", minutes / 60 % 24, minutes % 60)
 }
 
+// "Sat 24 Oct · today"
 fn day_heading(date: NaiveDate) -> String {
     let t = today();
     let relative = if date == t {
@@ -282,8 +309,11 @@ fn day_heading(date: NaiveDate) -> String {
     format!("{}{}", date.format("%a %d %b"), relative)
 }
 
+// Where does something that starts on `from` at minute `start` and lasts `len`
+// minutes fall on the day `on`? Handles crossing midnight (and several days).
+// Returns (start, end) in minutes since midnight of `on`.
 fn span_on(from: NaiveDate, start: u32, len: u32, on: NaiveDate) -> Option<(u32, u32)> {
-    let a = (on - from).num_days() * 1440;
+    let a = (on - from).num_days() * 1440; // minutes from `from` 00:00 to `on` 00:00
     if a < 0 {
         return None;
     }
@@ -296,6 +326,7 @@ fn span_on(from: NaiveDate, start: u32, len: u32, on: NaiveDate) -> Option<(u32,
     }
 }
 
+// Turns a sort key upside down so the newest sorts first: digits are mirrored.
 fn desc_key(key: &str) -> String {
     key.chars()
         .map(|c| match c.to_digit(10) {
@@ -305,6 +336,8 @@ fn desc_key(key: &str) -> String {
         .collect()
 }
 
+// Cleans the word after a #: strips punctuation and lowercases, so #Errands and #errands! are the
+// same tag. None if nothing is left.
 fn clean_tag(word: &str) -> Option<String> {
     let tag = word
         .trim_matches(|c: char| !c.is_alphanumeric())
@@ -316,6 +349,8 @@ fn clean_tag(word: &str) -> Option<String> {
     }
 }
 
+// "Buy milk #errands @quick" -> ("Buy milk", ["errands"], Some("quick"))
+// Words starting with # are tags. With `groups` on, a word starting with @ is a group.
 fn split_text(text: &str, groups: bool) -> (String, Vec<String>, Option<String>) {
     let mut words: Vec<&str> = Vec::new();
     let mut tags: Vec<String> = Vec::new();
@@ -338,6 +373,7 @@ fn split_text(text: &str, groups: bool) -> (String, Vec<String>, Option<String>)
     (words.join(" "), tags, group)
 }
 
+// The reverse of split_text, used to pre-fill the edit box.
 fn join_text(title: &str, tags: &[String], group: Option<&str>) -> String {
     let mut out = title.to_string();
     for tag in tags {
@@ -351,6 +387,7 @@ fn join_text(title: &str, tags: &[String], group: Option<&str>) -> String {
     out
 }
 
+// ["a", "b"] -> "#a #b", the way tags are shown in lists.
 fn tags_text(tags: &[String]) -> String {
     tags.iter()
         .map(|t| format!("#{}", t))
@@ -358,6 +395,7 @@ fn tags_text(tags: &[String]) -> String {
         .join(" ")
 }
 
+// All #words of a free-form line (the diary uses this).
 fn hashtags(text: &str) -> Vec<String> {
     let mut found: Vec<String> = Vec::new();
     for word in text.split_whitespace() {
@@ -372,21 +410,13 @@ fn hashtags(text: &str) -> Vec<String> {
     found
 }
 
-// First `room` characters, ellipsis if longer. Used in chat rows.
-fn truncate(s: &str, room: usize) -> String {
-    if s.chars().count() <= room {
-        s.to_string()
-    } else {
-        let mut out: String = s.chars().take(room.saturating_sub(1)).collect();
-        out.push('…');
-        out
-    }
-}
-
 // ===========================================================================
-// 2. STORAGE: Entry, Store<T>, Logger
+// 2. STORAGE: Entry (what is stored), Store<T> (the file), Logger (history)
 // ===========================================================================
 
+// All data lives in one folder shared by every part of the system: this app,
+// the browser panel (src/bin/panel.rs) and whatever comes next.
+// The default is ~/dortyuzlu; DORTYUZLU_DIR overrides it.
 fn data_dir() -> PathBuf {
     let dir = match std::env::var_os("DORTYUZLU_DIR") {
         Some(dir) => PathBuf::from(dir),
@@ -403,6 +433,8 @@ fn data_path(name: &str) -> PathBuf {
     data_dir().join(name)
 }
 
+// Before the shared folder existed, files were kept wherever the app was
+// started. The first time, copy such a file over (the old copy stays untouched).
 fn adopt_old_file(name: &str) {
     let target = data_path(name);
     if !target.exists() && Path::new(name).is_file() {
@@ -410,33 +442,35 @@ fn adopt_old_file(name: &str) {
     }
 }
 
-// Pure helper so the id rule is testable without disk.
-fn next_id_from(in_file: u64, stored: u64) -> u64 {
-    in_file.max(stored) + 1
-}
-
+// Entry = the least every stored kind must tell: id, title, and optionally a body and tags. Store,
+// the fuzzy finder and the tabs only use these methods, so they work for every kind alike.
 trait Entry: Serialize + DeserializeOwned + Clone {
-    const FILE: &'static str;
+    const FILE: &'static str; // "todos.json", "pages.json"
     fn id(&self) -> u64;
     fn title(&self) -> &str;
     fn body(&self) -> &str {
-        ""
+        "" // default: nothing extra to search
     }
     fn tags(&self) -> &[String] {
-        &[]
+        &[] // default: this kind of entry has no tags
     }
 }
 
+// Store<T> = all entries of one kind in one JSON file (T::FILE) in the data folder. Loaded once at
+// start, saved after every change.
 struct Store<T: Entry> {
     items: Vec<T>,
 }
 
 impl<T: Entry> Store<T> {
+    // Reads the file. A missing file means an empty list; an unreadable one is moved aside (never
+    // overwritten) and we start empty.
     fn load() -> Self {
         adopt_old_file(T::FILE);
         let path = data_path(T::FILE);
         let items = match fs::read_to_string(&path) {
             Ok(text) => serde_json::from_str(&text).unwrap_or_else(|_| {
+                // never crash on, or overwrite, a file we can't read: keep it aside
                 let aside = data_path(&format!("{}.corrupt", T::FILE));
                 let _ = fs::rename(&path, &aside);
                 eprintln!(
@@ -450,37 +484,27 @@ impl<T: Entry> Store<T> {
         };
         Store { items }
     }
-
+    // Writes the whole list to disk. A disk error panics on purpose: better than silently losing
+    // data.
     fn save(&self) {
         let text = serde_json::to_string_pretty(&self.items).expect("serialize failed");
+        // write beside, then rename: a crash mid-write can't leave half a file
         let temp = data_path(&format!("{}.tmp", T::FILE));
         fs::write(&temp, text).expect("write failed");
         fs::rename(&temp, data_path(T::FILE)).expect("rename failed");
     }
-
-    // Ids never reuse, even after deletes. A high-water mark in a sidecar file
-    // keeps a deleted id from being handed to a new entry (which would confuse
-    // proposals and the log).
+    // Ids only grow: highest id + 1. (If the newest entry was deleted, its id can be handed out
+    // again.)
     fn next_id(&self) -> u64 {
-        let in_file = self.items.iter().map(|i| i.id()).max().unwrap_or(0);
-        let hw_path = data_path(&format!("{}.high_water", T::FILE));
-        let stored: u64 = fs::read_to_string(&hw_path)
-            .ok()
-            .and_then(|s| s.trim().parse().ok())
-            .unwrap_or(0);
-        let next = next_id_from(in_file, stored);
-        let _ = fs::write(&hw_path, next.to_string());
-        next
+        self.items.iter().map(|i| i.id()).max().unwrap_or(0) + 1
     }
-
     fn get(&self, id: u64) -> Option<&T> {
         self.items.iter().find(|i| i.id() == id)
     }
-
     fn get_mut(&mut self, id: u64) -> Option<&mut T> {
         self.items.iter_mut().find(|i| i.id() == id)
     }
-
+    // True if something was removed.
     fn remove(&mut self, id: u64) -> bool {
         let before = self.items.len();
         self.items.retain(|i| i.id() != id);
@@ -488,6 +512,7 @@ impl<T: Entry> Store<T> {
     }
 }
 
+// Several tabs can be views of one file; they share one Store.
 #[allow(type_alias_bounds)]
 type Shared<T: Entry> = Rc<RefCell<Store<T>>>;
 
@@ -495,6 +520,9 @@ fn share<T: Entry>() -> Shared<T> {
     Rc::new(RefCell::new(Store::load()))
 }
 
+// One history file for every part: history.jsonl
+
+// What happened to an entry. Every change is written to history.jsonl with one of these.
 #[derive(Clone, Serialize, Deserialize)]
 enum Kind {
     Added,
@@ -502,27 +530,31 @@ enum Kind {
     Done,
     Reopened,
     Edited,
-    Counted,
-    Approved,
-    Rejected,
+    Counted,  // a habit was counted
+    Approved, // the user said yes to a proposal
+    Rejected, // the user said no
 }
 
 fn legacy_module() -> String {
-    "todo".to_string()
+    "todo".to_string() // old log lines had no module field; they were all todos
 }
 
+// One line of history.jsonl: what happened, to which entry of which module, and its title at that
+// moment.
 #[derive(Clone, Serialize, Deserialize)]
 struct LogEvent {
-    id: u64,
+    id: u64, // this event's own id, unique forever
     #[serde(default = "legacy_module")]
-    module: String,
+    module: String, // which part wrote it: "todo", "dict", ...
     kind: Kind,
     #[serde(alias = "todo_id")]
-    entry_id: u64,
+    entry_id: u64, // which entry of that module it happened to
     #[serde(alias = "header", default)]
-    title: String,
+    title: String, // the title at that moment
 }
 
+// Logger = the append-only history file. Every tab reports each change here; old lines are never
+// rewritten.
 struct Logger {
     next_id: u64,
 }
@@ -530,6 +562,7 @@ struct Logger {
 impl Logger {
     const FILE: &'static str = "history.jsonl";
 
+    // Looks up the highest event id already in the file so new events continue the numbering.
     fn open() -> Self {
         adopt_old_file(Self::FILE);
         let max = fs::read_to_string(data_path(Self::FILE))
@@ -544,6 +577,7 @@ impl Logger {
         Logger { next_id: max + 1 }
     }
 
+    // Appends one event as one JSON line.
     fn log(&mut self, module: &str, kind: Kind, entry_id: u64, title: &str) {
         let event = LogEvent {
             id: self.next_id,
@@ -567,6 +601,8 @@ impl Logger {
 // 3. FUZZY FINDER
 // ===========================================================================
 
+// Returns None if the query's letters don't appear in order in the target.
+// Higher score = better match.
 fn fuzzy_score(query: &str, target: &str) -> Option<i32> {
     let query: Vec<char> = query.to_lowercase().chars().collect();
     let target: Vec<char> = target.to_lowercase().chars().collect();
@@ -578,11 +614,13 @@ fn fuzzy_score(query: &str, target: &str) -> Option<i32> {
     for (ti, &c) in target.iter().enumerate() {
         if qi < query.len() && c == query[qi] {
             score += 1;
+            // bonus: matched right after the previous matched letter
             if let Some(last) = last_match {
                 if last + 1 == ti {
                     score += 5;
                 }
             }
+            // bonus: matched at the start of a word
             if ti == 0 || target[ti - 1] == ' ' {
                 score += 3;
             }
@@ -598,6 +636,8 @@ fn fuzzy_score(query: &str, target: &str) -> Option<i32> {
     }
 }
 
+// One scoring rule for every kind of entry. "#tag" searches tags only;
+// otherwise a title match counts double a body or tag match.
 fn score_item<T: Entry>(item: &T, query: &str) -> Option<i32> {
     if let Some(tag) = query.strip_prefix('#') {
         let tag = tag.to_lowercase();
@@ -611,29 +651,39 @@ fn score_item<T: Entry>(item: &T, query: &str) -> Option<i32> {
 }
 
 // ===========================================================================
-// 4. MODULE
+// 4. MODULE: what a "part" (a tab) is
 // ===========================================================================
 
+// One line in a tab's list: the entry's id, the text shown, and an optional heading (group) it
+// sits under.
 struct Row {
     id: u64,
     label: String,
-    group: String,
+    group: String, // rows with the same non-empty group sit under one heading
 }
 
 impl Row {
     fn new(id: u64, label: String) -> Row {
-        Row { id, label, group: String::new() }
+        Row {
+            id,
+            label,
+            group: String::new(),
+        }
     }
 }
 
+// A command the UI offers for a module. The UI asks each prompt in order,
+// then hands the answers to Module::apply. No prompts = runs immediately.
 #[derive(Clone, Copy)]
 struct Action {
     key: char,
     label: &'static str,
-    needs_item: bool,
+    needs_item: bool, // acts on the selected row
     prompts: &'static [&'static str],
 }
 
+// A module asking another module to do something. It runs exactly like a key
+// press on that tab, so a module can never do more than the user could.
 struct Request {
     module: String,
     key: char,
@@ -641,96 +691,141 @@ struct Request {
     input: Vec<String>,
 }
 
+// Module = what the App sees of a tab. The App knows nothing about todos or habits; it only asks a
+// Module for rows, details and actions. Methods with a default body are optional.
 trait Module {
+    // Name shown on the tab (also how other modules and the inbox find it).
     fn name(&self) -> &'static str;
+    // Title of the list box (name plus the current view and filters).
     fn heading(&self) -> String {
         self.name().to_string()
     }
+    // Should the day bar (24h strip with a "now" marker) show on this tab?
     fn shows_day_bar(&self) -> bool {
         false
     }
+    // Which day the bar shows. None = today. `selected` is the selected row.
     fn bar_date(&self, _selected: Option<u64>) -> Option<NaiveDate> {
         None
     }
+    // Stretches of the given day this part wants painted on the day bar,
+    // as (start, end) in minutes since midnight.
     fn day_blocks(&self, _date: NaiveDate) -> Vec<(u32, u32)> {
         Vec::new()
     }
     fn block_color(&self) -> Color {
         Color::Magenta
     }
+    // Which row is selected when the tab is first opened.
     fn initial_row(&self) -> usize {
         0
     }
+    // The list on the left: one Row per visible entry, already sorted.
     fn rows(&self) -> Vec<Row>;
+    // Text for the right-hand pane about one row.
     fn detail(&self, id: u64) -> String;
+    // The keys this tab offers; they also make up the hints in the bottom bar.
     fn actions(&self) -> Vec<Action>;
+    // Text to pre-fill in the input box (used by edit). Default: empty.
     fn initial(&self, _action: char, _id: u64, _step: usize) -> String {
         String::new()
     }
-    fn apply(&mut self, action: char, id: Option<u64>, input: &[String], log: &mut Logger)
-        -> String;
+    // Does the work and returns a status message for the UI.
+    // Runs an action once the UI has collected its prompts. `id` is the selected row. Returns the
+    // message for the status line.
+    fn apply(
+        &mut self,
+        action: char,
+        id: Option<u64>,
+        input: &[String],
+        log: &mut Logger,
+    ) -> String;
+    // The fuzzy finder asks every part.
     fn search(&self, _query: &str) -> Vec<(i32, Row)> {
         Vec::new()
     }
+    // The search tab opened one of our rows: make sure no filter hides it.
     fn reveal(&mut self, _id: u64) {}
+    // Called at start-up and every half minute: time-based housekeeping.
     fn tick(&mut self, _log: &mut Logger) {}
+    // Requests this module wants other modules to run (see Request).
     fn outbox(&mut self) -> Vec<Request> {
         Vec::new()
     }
+    // A tab like the diary takes whole lines typed at the bottom instead of commands.
     fn takes_lines(&self) -> bool {
         false
     }
+    // `at` is when it was written ("YYYY-MM-DD HH:MM"), or empty for now. The
+    // browser panel can hand in a line long after it was typed.
     fn line_input(&mut self, _text: &str, _at: &str, _log: &mut Logger) -> Option<String> {
         None
     }
+    // Adds a new entry from typed answers, like the `a` key. The browser
+    // panel's todos and timetable entries come in this way.
     fn add(&mut self, _input: &[String], _log: &mut Logger) -> Result<String, String> {
         Err("This tab doesn't take new entries.".to_string())
     }
 }
 
 // ===========================================================================
-// 5. RECORD + ListModule
+// 5. RECORD + ListModule: the part that used to be copy-pasted per tab
+//
+// A kind of entry (todo, habit, page, event...) implements Record: how it is
+// typed in, how it is shown, and its special keys. ListModule<T> then gives
+// it a tab with add / edit / delete, views, tag filter, search and day-bar
+// blocks, so a new tab is one `impl Record` plus one line in App::new.
+//
+// `lens` lets several tabs look at one file differently (todo / done / cubes).
 // ===========================================================================
 
-type Outcome = Result<(Kind, String), String>;
+type Outcome = Result<(Kind, String), String>; // Ok = (what to log, message), Err = message
 
 trait Record: Entry {
-    const NOUN: &'static str;
-    const TAGGED: bool = false;
-    const LINES: bool = false;
-    const COLOR: Color = Color::Magenta;
+    const NOUN: &'static str; // "todo": used in messages and as the log name
+    const TAGGED: bool = false; // offer the tag filter on this tab?
+    const LINES: bool = false; // is this tab a typed-line log (diary)?
+    const COLOR: Color = Color::Magenta; // colour of its blocks on the day bar
 
+    // ----- typing things in -----
     fn prompts() -> &'static [&'static str];
+    // The current values as text, one per prompt (fills the edit box).
     fn fields(&self) -> Vec<String>;
+    // Builds an entry from the typed answers. `old` is Some when editing,
+    // so values that aren't typed (counts, dates...) can be kept.
     fn build(id: u64, input: &[String], old: Option<&Self>) -> Result<Self, String>;
+    // `at` = "YYYY-MM-DD HH:MM" of when it was written, empty = now
     fn from_line(_id: u64, _text: &str, _at: &str) -> Option<Self> {
         None
     }
 
+    // ----- showing things -----
     fn label(&self, lens: u8) -> String;
     fn detail(&self, lens: u8) -> String;
     fn in_lens(&self, _lens: u8) -> bool {
-        true
+        true // does this tab show this entry at all?
     }
     fn views(_lens: u8) -> &'static [&'static str] {
-        &[]
+        &[] // names the `v` key cycles through
     }
     fn shown(&self, _lens: u8, _view: &str) -> bool {
-        true
+        true // is it visible in the current view?
     }
     fn group(&self, _lens: u8) -> String {
-        String::new()
+        String::new() // heading it sits under
     }
     fn order(&self, _lens: u8) -> String {
-        String::new()
+        String::new() // sort key, ascending; must start with the group's rank
     }
 
+    // ----- keys -----
     fn keys(_lens: u8) -> &'static str {
-        "aed"
+        "aed" // which of add / edit / delete this tab offers
     }
     fn extra_actions(_lens: u8) -> Vec<Action> {
         Vec::new()
     }
+    // Runs a special key on one entry. None = not one of its keys.
     fn act(&mut self, _lens: u8, _key: char, _input: &[String]) -> Option<Outcome> {
         None
     }
@@ -738,14 +833,18 @@ trait Record: Entry {
         String::new()
     }
 
+    // ----- time -----
     fn blocks(&self, _lens: u8, _date: NaiveDate) -> Vec<(u32, u32)> {
         Vec::new()
     }
+    // Housekeeping. Returns true if something changed (so it gets saved).
     fn tick(&mut self) -> bool {
         false
     }
 }
 
+// The generic tab for any Record. `lens` picks which look at the shared file this tab has, `view`
+// is the current `v` view, `tag` the active `t` filter, `bar` whether the day bar shows.
 struct ListModule<T: Record> {
     name: &'static str,
     lens: u8,
@@ -767,11 +866,13 @@ impl<T: Record> ListModule<T> {
         }
     }
 
+    // Builder step: also show the day bar on this tab.
     fn with_bar(mut self) -> Self {
         self.bar = true;
         self
     }
 
+    // Adding is its own method (the `a` key and the browser panel both use it).
     fn add_entry(&mut self, input: &[String], log: &mut Logger) -> Result<String, String> {
         if !T::keys(self.lens).contains('a') {
             return Err("This tab doesn't take new entries.".to_string());
@@ -786,10 +887,13 @@ impl<T: Record> ListModule<T> {
         Ok(format!("Added {}.", T::NOUN))
     }
 
+    // Name of the current view ("focus", "all"...), or "" if this kind has no views.
     fn view_name(&self) -> &'static str {
         T::views(self.lens).get(self.view).copied().unwrap_or("")
     }
 
+    // Is this entry shown right now? It must belong to this lens, pass the view, and match the tag
+    // filter.
     fn visible(&self, item: &T) -> bool {
         item.in_lens(self.lens)
             && item.shown(self.lens, self.view_name())
@@ -802,6 +906,7 @@ impl<T: Record> Module for ListModule<T> {
         self.name
     }
 
+    // Title of the list box: name, view, tag filter and how many entries the filters hide.
     fn heading(&self) -> String {
         let store = self.store.borrow();
         let hidden = store
@@ -841,6 +946,8 @@ impl<T: Record> Module for ListModule<T> {
         blocks
     }
 
+    // Visible entries sorted by their `order` key. The key starts with the group's rank, so groups
+    // stay together under one heading.
     fn rows(&self) -> Vec<Row> {
         let store = self.store.borrow();
         let mut list: Vec<(String, Row)> = store
@@ -856,7 +963,7 @@ impl<T: Record> Module for ListModule<T> {
                 (i.order(self.lens), row)
             })
             .collect();
-        list.sort_by(|a, b| a.0.cmp(&b.0));
+        list.sort_by(|a, b| a.0.cmp(&b.0)); // stable: ties keep file order
         list.into_iter().map(|(_, row)| row).collect()
     }
 
@@ -873,17 +980,37 @@ impl<T: Record> Module for ListModule<T> {
         let keys = T::keys(self.lens);
         let mut list = Vec::new();
         if keys.contains('a') {
-            list.push(Action { key: 'a', label: "add", needs_item: false, prompts: T::prompts() });
+            list.push(Action {
+                key: 'a',
+                label: "add",
+                needs_item: false,
+                prompts: T::prompts(),
+            });
         }
         list.extend(T::extra_actions(self.lens));
         if keys.contains('e') {
-            list.push(Action { key: 'e', label: "edit", needs_item: true, prompts: T::prompts() });
+            list.push(Action {
+                key: 'e',
+                label: "edit",
+                needs_item: true,
+                prompts: T::prompts(),
+            });
         }
         if keys.contains('d') {
-            list.push(Action { key: 'd', label: "delete", needs_item: true, prompts: &[] });
+            list.push(Action {
+                key: 'd',
+                label: "delete",
+                needs_item: true,
+                prompts: &[],
+            });
         }
         if !T::views(self.lens).is_empty() {
-            list.push(Action { key: 'v', label: "view", needs_item: false, prompts: &[] });
+            list.push(Action {
+                key: 'v',
+                label: "view",
+                needs_item: false,
+                prompts: &[],
+            });
         }
         if T::TAGGED {
             list.push(Action {
@@ -898,7 +1025,9 @@ impl<T: Record> Module for ListModule<T> {
 
     fn initial(&self, action: char, id: u64, step: usize) -> String {
         let store = self.store.borrow();
-        let Some(item) = store.get(id) else { return String::new() };
+        let Some(item) = store.get(id) else {
+            return String::new();
+        };
         if action == 'e' {
             item.fields().get(step).cloned().unwrap_or_default()
         } else {
@@ -906,11 +1035,13 @@ impl<T: Record> Module for ListModule<T> {
         }
     }
 
-    fn apply(&mut self, key: char, id: Option<u64>, input: &[String], log: &mut Logger)
-        -> String {
+    // The generic key handler. v and t only change what is shown; a / e / d add, edit, delete; any
+    // other key goes to the entry's own `act`. Every change is saved at once and logged.
+    fn apply(&mut self, key: char, id: Option<u64>, input: &[String], log: &mut Logger) -> String {
         let lens = self.lens;
         let keys = T::keys(lens);
 
+        // the two keys that change what the tab shows, not the data
         if key == 'v' && !T::views(lens).is_empty() {
             self.view = (self.view + 1) % T::views(lens).len();
             return format!("View: {}.", self.view_name());
@@ -933,7 +1064,9 @@ impl<T: Record> Module for ListModule<T> {
         let mut store = self.store.borrow_mut();
         match key {
             'e' if keys.contains('e') => {
-                let Some(id) = id else { return "Nothing selected.".to_string() };
+                let Some(id) = id else {
+                    return "Nothing selected.".to_string();
+                };
                 let Some(old) = store.get(id).cloned() else {
                     return format!("No such {}.", T::NOUN);
                 };
@@ -950,7 +1083,9 @@ impl<T: Record> Module for ListModule<T> {
                 format!("Edited {}.", T::NOUN)
             }
             'd' if keys.contains('d') => {
-                let Some(id) = id else { return "Nothing selected.".to_string() };
+                let Some(id) = id else {
+                    return "Nothing selected.".to_string();
+                };
                 let Some(title) = store.get(id).map(|i| i.title().to_string()) else {
                     return format!("No such {}.", T::NOUN);
                 };
@@ -978,6 +1113,7 @@ impl<T: Record> Module for ListModule<T> {
         }
     }
 
+    // Fuzzy finder support: every entry of this lens that matches the query, with its score.
     fn search(&self, query: &str) -> Vec<(i32, Row)> {
         let store = self.store.borrow();
         let hits: Vec<(i32, Row)> = store
@@ -991,6 +1127,8 @@ impl<T: Record> Module for ListModule<T> {
         hits
     }
 
+    // Called when the search tab opens one of our rows: drop the tag filter and switch to the
+    // "all" view so the row can't be hidden.
     fn reveal(&mut self, _id: u64) {
         self.tag.clear();
         if let Some(pos) = T::views(self.lens).iter().position(|v| *v == "all") {
@@ -998,6 +1136,7 @@ impl<T: Record> Module for ListModule<T> {
         }
     }
 
+    // Lets every entry do its time-based housekeeping; saves only if something changed.
     fn tick(&mut self, _log: &mut Logger) {
         let mut store = self.store.borrow_mut();
         let mut changed = false;
@@ -1017,6 +1156,7 @@ impl<T: Record> Module for ListModule<T> {
         self.add_entry(input, log)
     }
 
+    // For line tabs (the diary): turns one typed line into a new entry.
     fn line_input(&mut self, text: &str, at: &str, log: &mut Logger) -> Option<String> {
         if !T::LINES {
             return None;
@@ -1035,18 +1175,23 @@ impl<T: Record> Module for ListModule<T> {
 }
 
 // ===========================================================================
-// 6. TODO
+// 6. TODO: three tabs on one file
+//      lens 0 = "todo"   open todos, grouped, with a calm "focus" view
+//      lens 1 = "done"   finished todos, newest first
+//      lens 2 = "cubes"  open todos as sized blocks that can be put on the timeline
 // ===========================================================================
 
+// Every todo sits in one group. The groups keep a long list calm: the todo tab
+// opens on "focus", which hides the groups that don't need attention today.
 #[derive(Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 enum Group {
     #[default]
-    Main,
-    Quick,
-    Steady,
-    Resurface,
-    Secondary,
-    Serotonin,
+    Main, // the real list
+    Quick,     // easily done
+    Steady,    // needs a little work every day
+    Resurface, // comes back every day, reopens itself after you finish it
+    Secondary, // can wait
+    Serotonin, // small joys
 }
 
 impl Group {
@@ -1085,6 +1230,7 @@ impl Group {
         Group::ALL.iter().position(|g| *g == self).unwrap_or(0)
     }
 
+    // Exact word, or a prefix that only one group starts with ("sero", "q", "res").
     fn parse(text: &str) -> Option<Group> {
         let text = text.trim().to_lowercase();
         if text.is_empty() {
@@ -1106,6 +1252,8 @@ impl Group {
     }
 }
 
+// One todo. The same record backs three tabs (todo, done, cubes); `is_done`, `minutes` and `slot`
+// decide where it shows up and how.
 #[derive(Clone, Serialize, Deserialize)]
 struct Todo {
     id: u64,
@@ -1116,13 +1264,13 @@ struct Todo {
     #[serde(default)]
     tags: Vec<String>,
     #[serde(default)]
-    added: String,
+    added: String, // "YYYY-MM-DD"; todos from before this field get today's date once
     #[serde(default)]
-    done_on: String,
+    done_on: String, // "YYYY-MM-DD" it was finished
     #[serde(default)]
-    minutes: u32,
+    minutes: u32, // cube size in minutes, 0 = not sized yet
     #[serde(default)]
-    slot: String,
+    slot: String, // "YYYY-MM-DD HH:MM" when placed on the timeline, empty = not placed
 }
 
 impl Entry for Todo {
@@ -1139,15 +1287,18 @@ impl Entry for Todo {
 }
 
 impl Todo {
+    // Days since it was added (None if the date can't be read).
     fn age_days(&self) -> Option<i64> {
         parse_date(&self.added).map(|d| (today() - d).num_days())
     }
 
+    // (day, start minute) when the cube is on the timeline
     fn placed(&self) -> Option<(NaiveDate, u32)> {
         let (date, time) = self.slot.split_once(' ')?;
         Some((parse_date(date)?, minutes_of(time)?))
     }
 
+    // an unsized cube counts as half an hour
     fn length(&self) -> u32 {
         if self.minutes == 0 {
             30
@@ -1156,12 +1307,15 @@ impl Todo {
         }
     }
 
+    // When the cube's time on the timeline ends (start + length). The AI's "mark as done?" rule
+    // uses it.
     fn slot_end(&self) -> Option<NaiveDateTime> {
         let start = NaiveDateTime::parse_from_str(&self.slot, "%Y-%m-%d %H:%M").ok()?;
         Some(start + chrono::Duration::minutes(self.length() as i64))
     }
 }
 
+// "18:30" means today at 18:30; "2026-10-30 18:30" names the day.
 fn parse_when(text: &str) -> Result<String, String> {
     let text = text.trim();
     let bad = || "Use HH:MM (today) or YYYY-MM-DD HH:MM.".to_string();
@@ -1173,12 +1327,21 @@ fn parse_when(text: &str) -> Result<String, String> {
     Ok(format!("{} {}", date.format(DATE_FMT), clock(minutes)))
 }
 
+// The views the `v` key cycles through on each of the three tabs.
 const TODO_VIEWS: &[&str] = &[
-    "focus", "all", "main", "quick", "steady", "resurface", "secondary", "serotonin",
+    "focus",
+    "all",
+    "main",
+    "quick",
+    "steady",
+    "resurface",
+    "secondary",
+    "serotonin",
 ];
 const DONE_VIEWS: &[&str] = &["today", "week", "all"];
 const CUBE_VIEWS: &[&str] = &["all", "placed", "unplaced"];
 
+// Todo as a Record. `lens` is 0 for the todo tab, 1 for done, 2 for cubes.
 impl Record for Todo {
     const NOUN: &'static str = "todo";
     const TAGGED: bool = true;
@@ -1189,15 +1352,22 @@ impl Record for Todo {
     }
 
     fn fields(&self) -> Vec<String> {
-        let group = if self.group == Group::Main { None } else { Some(self.group.word()) };
+        let group = if self.group == Group::Main {
+            None
+        } else {
+            Some(self.group.word())
+        };
         vec![join_text(&self.header, &self.tags, group)]
     }
 
+    // Typed text -> Todo. When editing, `old` supplies what isn't typed (done state, dates, cube
+    // size and slot).
     fn build(id: u64, input: &[String], old: Option<&Todo>) -> Result<Todo, String> {
         let (title, tags, group) = split_text(&input[0], true);
         if title.is_empty() {
             return Err("Title can't be empty.".to_string());
         }
+        // no @group typed means main; the edit box shows @group, so removing it resets it
         let group = match group {
             Some(word) => Group::parse(&word).ok_or_else(|| {
                 format!(
@@ -1220,6 +1390,7 @@ impl Record for Todo {
         })
     }
 
+    // The one-line text in the list; each lens formats it differently.
     fn label(&self, lens: u8) -> String {
         let tags = if self.tags.is_empty() {
             String::new()
@@ -1279,7 +1450,11 @@ impl Record for Todo {
             self.slot.clone()
         };
         let mut text = format!("{}\n\nstatus: {}\n", self.header, status);
-        text.push_str(&format!("group: {} ({})\n", self.group.word(), self.group.about()));
+        text.push_str(&format!(
+            "group: {} ({})\n",
+            self.group.word(),
+            self.group.about()
+        ));
         if !self.tags.is_empty() {
             text.push_str(&format!("tags: {}\n", tags_text(&self.tags)));
         }
@@ -1290,6 +1465,7 @@ impl Record for Todo {
         text
     }
 
+    // The todo and cubes tabs show open todos; the done tab shows finished ones.
     fn in_lens(&self, lens: u8) -> bool {
         if lens == 1 {
             self.is_done
@@ -1306,19 +1482,24 @@ impl Record for Todo {
         }
     }
 
+    // Does the current view show it? ("focus" hides secondary and serotonin.)
     fn shown(&self, lens: u8, view: &str) -> bool {
         match (lens, view) {
             (0, "focus") => !matches!(self.group, Group::Secondary | Group::Serotonin),
             (0, "all") | (2, "all") => true,
             (0, word) => self.group.word() == word,
             (1, "today") => self.done_on == today_text(),
-            (1, "week") => parse_date(&self.done_on).map_or(false, |d| (today() - d).num_days() < 7),
+            (1, "week") => {
+                parse_date(&self.done_on).map_or(false, |d| (today() - d).num_days() < 7)
+            }
             (2, "placed") => !self.slot.is_empty(),
             (2, "unplaced") => self.slot.is_empty(),
             _ => true,
         }
     }
 
+    // The heading it sits under: the day finished (done tab), the day placed (cubes tab) or its
+    // group (todo tab).
     fn group(&self, lens: u8) -> String {
         match lens {
             1 => parse_date(&self.done_on)
@@ -1332,6 +1513,8 @@ impl Record for Todo {
         }
     }
 
+    // Sort key. Todo: group rank, then id. Done: newest first. Cubes: the unplaced pile first,
+    // then by day and start time.
     fn order(&self, lens: u8) -> String {
         match lens {
             1 => desc_key(&format!("{}{:012}", self.done_on, self.id)),
@@ -1353,8 +1536,15 @@ impl Record for Todo {
         }
     }
 
+    // Keys besides add / edit / delete: x done or reopen, g change group; on the cubes tab also m
+    // size and s place on the timeline.
     fn extra_actions(lens: u8) -> Vec<Action> {
-        let done = |label: &'static str| Action { key: 'x', label, needs_item: true, prompts: &[] };
+        let done = |label: &'static str| Action {
+            key: 'x',
+            label,
+            needs_item: true,
+            prompts: &[],
+        };
         match lens {
             1 => vec![done("reopen")],
             2 => vec![
@@ -1393,11 +1583,17 @@ impl Record for Todo {
         }
     }
 
+    // The special keys: x flips done, g changes the group, m sets the cube size, s places it on
+    // the timeline (empty = take it off).
     fn act(&mut self, _lens: u8, key: char, input: &[String]) -> Option<Outcome> {
         match key {
             'x' => {
                 self.is_done = !self.is_done;
-                self.done_on = if self.is_done { today_text() } else { String::new() };
+                self.done_on = if self.is_done {
+                    today_text()
+                } else {
+                    String::new()
+                };
                 Some(Ok(if self.is_done {
                     (Kind::Done, "Moved to done.".to_string())
                 } else {
@@ -1418,14 +1614,20 @@ impl Record for Todo {
                 } else {
                     match text.parse() {
                         Ok(m) => m,
-                        Err(_) => return Some(Err("Size must be whole minutes, like 30.".to_string())),
+                        Err(_) => {
+                            return Some(Err("Size must be whole minutes, like 30.".to_string()))
+                        }
                     }
                 };
                 if minutes > 1440 {
                     return Some(Err("A cube can't be longer than a day (1440).".to_string()));
                 }
                 self.minutes = minutes;
-                let message = if minutes == 0 { "Size cleared." } else { "Cube resized." };
+                let message = if minutes == 0 {
+                    "Size cleared."
+                } else {
+                    "Cube resized."
+                };
                 Some(Ok((Kind::Edited, message.to_string())))
             }
             's' => {
@@ -1437,7 +1639,7 @@ impl Record for Todo {
                     Ok(slot) => {
                         self.slot = slot;
                         if self.minutes == 0 {
-                            self.minutes = 30;
+                            self.minutes = 30; // a cube on the timeline needs a size
                         }
                         Some(Ok((Kind::Edited, format!("Placed at {}.", self.slot))))
                     }
@@ -1448,20 +1650,26 @@ impl Record for Todo {
         }
     }
 
+    // a cube is painted on the day it is placed on (and the next, if it runs past midnight)
     fn blocks(&self, lens: u8, date: NaiveDate) -> Vec<(u32, u32)> {
         if lens != 2 || self.is_done {
             return Vec::new();
         }
-        let Some((from, start)) = self.placed() else { return Vec::new() };
-        span_on(from, start, self.length(), date).into_iter().collect()
+        let Some((from, start)) = self.placed() else {
+            return Vec::new();
+        };
+        span_on(from, start, self.length(), date)
+            .into_iter()
+            .collect()
     }
 
     fn tick(&mut self) -> bool {
         let mut changed = false;
         if self.added.is_empty() {
-            self.added = today_text();
+            self.added = today_text(); // age counting starts the first time it is seen
             changed = true;
         }
+        // a resurfacing todo opens again on the day after you finished it
         if self.group == Group::Resurface && self.is_done && self.done_on != today_text() {
             self.is_done = false;
             changed = true;
@@ -1471,7 +1679,9 @@ impl Record for Todo {
 }
 
 // ===========================================================================
-// 7. HABITS
+// 7. HABITS: ones to build and ones to quit, counted per day
+//    Build:  "read 20 pages"      target = at least this many a day
+//    Quit:   "smoking, max 5"     target = at most this many a day (0 = none)
 // ===========================================================================
 
 #[derive(Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
@@ -1481,6 +1691,8 @@ enum HabitKind {
     Quit,
 }
 
+// One habit with a count per day. Make: reach `target` a day. Quit: stay at or under `target` a
+// day.
 #[derive(Clone, Serialize, Deserialize)]
 struct Habit {
     id: u64,
@@ -1488,10 +1700,10 @@ struct Habit {
     kind: HabitKind,
     target: u32,
     #[serde(default)]
-    unit: String,
-    started: String,
+    unit: String, // "glasses", "cigarettes": only for display
+    started: String, // "YYYY-MM-DD": streaks never count days before this
     #[serde(default)]
-    counts: BTreeMap<String, u32>,
+    counts: BTreeMap<String, u32>, // "YYYY-MM-DD" -> how many times that day
     #[serde(default)]
     tags: Vec<String>,
 }
@@ -1510,6 +1722,7 @@ impl Entry for Habit {
 }
 
 impl Habit {
+    // How many times it was counted on that day.
     fn count(&self, day: NaiveDate) -> u32 {
         self.counts
             .get(&day.format(DATE_FMT).to_string())
@@ -1517,6 +1730,7 @@ impl Habit {
             .unwrap_or(0)
     }
 
+    // Did that day go well? Build: reached the target. Quit: stayed within the limit.
     fn good(&self, day: NaiveDate) -> bool {
         let n = self.count(day);
         match self.kind {
@@ -1529,6 +1743,8 @@ impl Habit {
         parse_date(&self.started).unwrap_or_else(today)
     }
 
+    // Good days in a row, counting back from today. A build-habit not yet done
+    // today is still open, so it neither counts nor breaks the streak.
     fn streak(&self) -> u32 {
         let start = self.start_day();
         let mut day = today();
@@ -1567,6 +1783,7 @@ impl Habit {
         best
     }
 
+    // (good days, counted days) over the last 30 days; an open day isn't counted
     fn consistency(&self) -> (u32, u32) {
         let start = self.start_day();
         let mut day = today();
@@ -1590,6 +1807,7 @@ impl Habit {
         (good, total)
     }
 
+    // the last `n` days, oldest first: ✓ good, ✗ missed or slipped, ○ still open, · before it started
     fn recent(&self, n: i64) -> String {
         let start = self.start_day();
         (0..n)
@@ -1654,7 +1872,11 @@ impl Record for Habit {
             Some(_) => return Err("Type b to build a habit or q to quit one.".to_string()),
         };
         let target: u32 = if input[2].trim().is_empty() {
-            if kind == HabitKind::Make { 1 } else { 0 }
+            if kind == HabitKind::Make {
+                1
+            } else {
+                0
+            }
         } else {
             input[2]
                 .trim()
@@ -1711,8 +1933,16 @@ impl Record for Habit {
             HabitKind::Quit => format!("quit: at most {}{} a day", self.target, self.unit_text()),
         };
         let mut text = format!("{}\n\n{}\n", self.title, goal);
-        text.push_str(&format!("today: {}{}\n", self.count(today()), self.unit_text()));
-        text.push_str(&format!("streak: {} days (best {})\n", self.streak(), self.best_streak()));
+        text.push_str(&format!(
+            "today: {}{}\n",
+            self.count(today()),
+            self.unit_text()
+        ));
+        text.push_str(&format!(
+            "streak: {} days (best {})\n",
+            self.streak(),
+            self.best_streak()
+        ));
         text.push_str(&format!("last 30 days: {} of {} good\n", good, total));
         text.push_str(&format!("last 14 days: {}\n", self.recent(14)));
         text.push_str(&format!("started: {}\n", self.started));
@@ -1737,11 +1967,22 @@ impl Record for Habit {
 
     fn extra_actions(_lens: u8) -> Vec<Action> {
         vec![
-            Action { key: '+', label: "+1", needs_item: true, prompts: &[] },
-            Action { key: '-', label: "-1", needs_item: true, prompts: &[] },
+            Action {
+                key: '+',
+                label: "+1",
+                needs_item: true,
+                prompts: &[],
+            },
+            Action {
+                key: '-',
+                label: "-1",
+                needs_item: true,
+                prompts: &[],
+            },
         ]
     }
 
+    // + adds one count today, - takes one away. Quit habits report when the limit is passed.
     fn act(&mut self, _lens: u8, key: char, _input: &[String]) -> Option<Outcome> {
         match key {
             '+' => {
@@ -1752,10 +1993,12 @@ impl Record for Habit {
                         format!("{}/{} today. Done!", n, self.target)
                     }
                     HabitKind::Make => format!("{}/{} today.", n, self.target),
-                    HabitKind::Quit if n > self.target => format!(
-                        "{} today, over the limit of {}. Streak reset.",
-                        n, self.target
-                    ),
+                    HabitKind::Quit if n > self.target => {
+                        format!(
+                            "{} today, over the limit of {}. Streak reset.",
+                            n, self.target
+                        )
+                    }
                     HabitKind::Quit => format!("{} of {} allowed today.", n, self.target),
                 };
                 Some(Ok((Kind::Counted, message)))
@@ -1779,9 +2022,11 @@ impl Record for Habit {
 }
 
 // ===========================================================================
-// 8. DAILY
+// 8. DAILY: things you do on set weekdays (sleep, school...), with a duration,
+//    that can sit on the day bar
 // ===========================================================================
 
+// Weekdays are numbered 0 = Monday ... 6 = Sunday everywhere in the code.
 const DAY_NAMES: [&str; 7] = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"];
 const WEEKDAYS: [u8; 5] = [0, 1, 2, 3, 4];
 const WEEKEND: [u8; 2] = [5, 6];
@@ -1790,6 +2035,7 @@ fn all_days() -> Vec<u8> {
     (0..7).collect()
 }
 
+// "mon", "Monday", "tues" -> 0..6 (matched by the first letters).
 fn day_index(word: &str) -> Option<u8> {
     let word = word.to_lowercase();
     DAY_NAMES
@@ -1798,6 +2044,7 @@ fn day_index(word: &str) -> Option<u8> {
         .map(|i| i as u8)
 }
 
+// "daily", "weekdays", "weekend", "mon-fri", "mon,wed,fri" -> sorted day numbers (0 = Monday)
 fn parse_days(text: &str) -> Result<Vec<u8>, String> {
     let text = text.trim().to_lowercase();
     match text.as_str() {
@@ -1806,9 +2053,17 @@ fn parse_days(text: &str) -> Result<Vec<u8>, String> {
         "weekend" | "weekends" => return Ok(WEEKEND.to_vec()),
         _ => {}
     }
-    let bad = || format!("Don't know \"{}\". Try daily, weekdays, mon-fri or mon,wed,fri.", text);
+    let bad = || {
+        format!(
+            "Don't know \"{}\". Try daily, weekdays, mon-fri or mon,wed,fri.",
+            text
+        )
+    };
     let mut days: Vec<u8> = Vec::new();
-    for part in text.split(|c: char| c == ',' || c.is_whitespace()).filter(|p| !p.is_empty()) {
+    for part in text
+        .split(|c: char| c == ',' || c.is_whitespace())
+        .filter(|p| !p.is_empty())
+    {
         if let Some((from, to)) = part.split_once('-') {
             let (Some(from), Some(to)) = (day_index(from), day_index(to)) else {
                 return Err(bad());
@@ -1821,10 +2076,12 @@ fn parse_days(text: &str) -> Result<Vec<u8>, String> {
                 if day == to {
                     break;
                 }
-                day = (day + 1) % 7;
+                day = (day + 1) % 7; // mon-sun and fri-mon both work
             }
         } else {
-            let Some(day) = day_index(part) else { return Err(bad()) };
+            let Some(day) = day_index(part) else {
+                return Err(bad());
+            };
             if !days.contains(&day) {
                 days.push(day);
             }
@@ -1837,6 +2094,7 @@ fn parse_days(text: &str) -> Result<Vec<u8>, String> {
     Ok(days)
 }
 
+// The reverse of parse_days: [0, 1, 2, 3, 4] -> "weekdays".
 fn days_text(days: &[u8]) -> String {
     if days.len() == 7 {
         "daily".to_string()
@@ -1852,18 +2110,20 @@ fn days_text(days: &[u8]) -> String {
     }
 }
 
+// A recurring thing on chosen weekdays with a duration, e.g. sleep or school. Ticking it off
+// counts for today only.
 #[derive(Clone, Serialize, Deserialize)]
 struct Daily {
     id: u64,
     title: String,
-    duration: u32,
-    specs: String,
+    duration: u32, // minutes
+    specs: String, // free-form details: what exactly, where, with what
     #[serde(default)]
-    start: String,
+    start: String, // "HH:MM" when it sits on the day bar, empty = not on the bar
     #[serde(default)]
-    done_dates: Vec<String>,
+    done_dates: Vec<String>, // days ("YYYY-MM-DD") it was ticked off
     #[serde(default = "all_days")]
-    days: Vec<u8>,
+    days: Vec<u8>, // weekdays it happens on, 0 = Monday ... 6 = Sunday
     #[serde(default)]
     tags: Vec<String>,
 }
@@ -1877,7 +2137,7 @@ impl Entry for Daily {
         &self.title
     }
     fn body(&self) -> &str {
-        &self.specs
+        &self.specs // searchable too
     }
     fn tags(&self) -> &[String] {
         &self.tags
@@ -1885,8 +2145,10 @@ impl Entry for Daily {
 }
 
 impl Daily {
+    // Is it planned on that date's weekday?
     fn active_on(&self, day: NaiveDate) -> bool {
-        self.days.contains(&(day.weekday().num_days_from_monday() as u8))
+        self.days
+            .contains(&(day.weekday().num_days_from_monday() as u8))
     }
 }
 
@@ -1966,7 +2228,11 @@ impl Record for Daily {
         } else {
             format!("at {}", self.start)
         };
-        let specs = if self.specs.is_empty() { "(none)" } else { self.specs.as_str() };
+        let specs = if self.specs.is_empty() {
+            "(none)"
+        } else {
+            self.specs.as_str()
+        };
         let mut text = format!(
             "{}\n\nduration: {} min\ndays: {}\nday bar: {}\nspecifications: {}\n",
             self.title,
@@ -1980,7 +2246,11 @@ impl Record for Daily {
         }
         text.push_str(&format!(
             "\ndone today: {}\ndays done in total: {}",
-            if self.done_dates.contains(&today_text()) { "yes" } else { "no" },
+            if self.done_dates.contains(&today_text()) {
+                "yes"
+            } else {
+                "no"
+            },
             self.done_dates.len()
         ));
         text
@@ -1996,13 +2266,22 @@ impl Record for Daily {
 
     fn order(&self, _lens: u8) -> String {
         let rank = if self.active_on(today()) { 0 } else { 1 };
-        let start = if self.start.is_empty() { "99:99" } else { self.start.as_str() };
+        let start = if self.start.is_empty() {
+            "99:99"
+        } else {
+            self.start.as_str()
+        };
         format!("{}{}{:012}", rank, start, self.id)
     }
 
     fn extra_actions(_lens: u8) -> Vec<Action> {
         vec![
-            Action { key: 'x', label: "done today", needs_item: true, prompts: &[] },
+            Action {
+                key: 'x',
+                label: "done today",
+                needs_item: true,
+                prompts: &[],
+            },
             Action {
                 key: 's',
                 label: "day bar",
@@ -2020,16 +2299,21 @@ impl Record for Daily {
         }
     }
 
+    // x ticks today off or back on (only on its planned days); s puts it on the day bar at a start
+    // time.
     fn act(&mut self, _lens: u8, key: char, input: &[String]) -> Option<Outcome> {
         match key {
             'x' => {
                 if !self.active_on(today()) {
-                    return Some(Err(format!("Not planned for today ({}).", days_text(&self.days))));
+                    return Some(Err(format!(
+                        "Not planned for today ({}).",
+                        days_text(&self.days)
+                    )));
                 }
                 let day = today_text();
                 let done = match self.done_dates.iter().position(|d| *d == day) {
                     Some(pos) => {
-                        self.done_dates.remove(pos);
+                        self.done_dates.remove(pos); // pressing again undoes it
                         false
                     }
                     None => {
@@ -2052,7 +2336,10 @@ impl Record for Daily {
                 match minutes_of(text) {
                     Some(minutes) => {
                         self.start = clock(minutes);
-                        Some(Ok((Kind::Edited, format!("On the day bar at {}.", self.start))))
+                        Some(Ok((
+                            Kind::Edited,
+                            format!("On the day bar at {}.", self.start),
+                        )))
                     }
                     None => Some(Err("Start must look like 19:00.".to_string())),
                 }
@@ -2061,8 +2348,12 @@ impl Record for Daily {
         }
     }
 
+    // On every day it is planned for, from its start time for its duration.
+    // Yesterday is checked too, so sleep from 23:00 shows up after midnight.
     fn blocks(&self, _lens: u8, date: NaiveDate) -> Vec<(u32, u32)> {
-        let Some(start) = minutes_of(&self.start) else { return Vec::new() };
+        let Some(start) = minutes_of(&self.start) else {
+            return Vec::new();
+        };
         [date.pred_opt(), Some(date)]
             .into_iter()
             .flatten()
@@ -2118,7 +2409,12 @@ impl Record for Page {
         if title.is_empty() {
             return Err("Title can't be empty.".to_string());
         }
-        Ok(Page { id, title, text: input[1].clone(), tags })
+        Ok(Page {
+            id,
+            title,
+            text: input[1].clone(),
+            tags,
+        })
     }
 
     fn label(&self, _lens: u8) -> String {
@@ -2143,16 +2439,18 @@ impl Record for Page {
 }
 
 // ===========================================================================
-// 10. CALENDAR EVENTS
+// 10. CALENDAR EVENTS: one events.json, shown by the agenda and calendar tabs
 // ===========================================================================
 
+// One calendar event: a date plus start and end times. An end earlier than the start means it runs
+// into the next day.
 #[derive(Clone, Serialize, Deserialize)]
 struct CalEvent {
     id: u64,
     title: String,
-    date: String,
-    start: String,
-    end: String,
+    date: String,  // "YYYY-MM-DD" it starts on
+    start: String, // "HH:MM"
+    end: String,   // "HH:MM"; earlier than start means it ends the next day
     #[serde(default)]
     tags: Vec<String>,
 }
@@ -2183,6 +2481,7 @@ impl CalEvent {
         self.end_min() < self.start_min()
     }
 
+    // Length in minutes, counting the night when it crosses midnight.
     fn length(&self) -> u32 {
         if self.overnight() {
             1440 - self.start_min() + self.end_min()
@@ -2195,6 +2494,7 @@ impl CalEvent {
         parse_date(&self.date).unwrap_or_else(today)
     }
 
+    // The day it ends on (the next day for overnight events).
     fn last_day(&self) -> NaiveDate {
         let day = self.first_day();
         if self.overnight() {
@@ -2314,76 +2614,17 @@ impl Record for CalEvent {
 }
 
 // ===========================================================================
-// 11. DIARY: with intents, the front door
+// 11. DIARY: one persistent line per Enter press; #words in a line become tags
 // ===========================================================================
 
-// What the parser recognised in a diary line. The Curator turns these into
-// yes/no proposals; nothing here acts on its own.
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
-enum Intent {
-    Todo { title: String, group: Group },
-    Event { title: String, date: String, start: String, end: String },
-    HabitCount { title: String, delta: u32 },
-    Done { title: String },
-}
-
-// Turn one diary line into zero or more intents. Hand-rolled; the keyword is
-// case-insensitive but the title keeps its case.
-fn parse_intents(text: &str) -> Vec<Intent> {
-    let trimmed = text.trim();
-    let lower = trimmed.to_lowercase();
-    let mut out = Vec::new();
-
-    if lower.starts_with("todo:") {
-        if let Some(rest) = trimmed.get(5..) {
-            let (title, _tags, group) = split_text(rest, true);
-            if !title.is_empty() {
-                let g = group.as_deref().and_then(Group::parse).unwrap_or(Group::Main);
-                out.push(Intent::Todo { title, group: g });
-                return out;
-            }
-        }
-    }
-
-    for prefix in ["finished ", "done ", "did "] {
-        if lower.starts_with(prefix) {
-            if let Some(rest) = trimmed.get(prefix.len()..) {
-                let title = rest.trim().to_string();
-                if !title.is_empty() {
-                    out.push(Intent::Done { title });
-                    return out;
-                }
-            }
-        }
-    }
-
-    if let Some([title, date, start, end]) = parse_timetable(trimmed) {
-        out.push(Intent::Event { title, date, start, end });
-        return out;
-    }
-
-    // "smoked 2" — exactly two words, second is a number. Narrow on purpose:
-    // "I read 5 pages" is not a count.
-    let words: Vec<&str> = trimmed.split_whitespace().collect();
-    if words.len() == 2 {
-        if let Ok(k) = words[1].parse::<u32>() {
-            out.push(Intent::HabitCount { title: words[0].to_string(), delta: k });
-            return out;
-        }
-    }
-
-    out
-}
-
+// One diary line with the minute it was written. #words inside it become tags.
 #[derive(Clone, Serialize, Deserialize)]
 struct DiaryLine {
     id: u64,
-    date: String,
+    date: String, // "YYYY-MM-DD HH:MM"
     text: String,
     #[serde(default)]
     tags: Vec<String>,
-    #[serde(default)]
-    intent: Vec<Intent>,
 }
 
 impl Entry for DiaryLine {
@@ -2433,7 +2674,6 @@ impl Record for DiaryLine {
             date,
             text: text.to_string(),
             tags: hashtags(text),
-            intent: parse_intents(text),
         })
     }
 
@@ -2442,16 +2682,15 @@ impl Record for DiaryLine {
     }
 
     fn detail(&self, _lens: u8) -> String {
-        let hints = if self.intent.is_empty() {
-            String::new()
-        } else {
-            format!("\n\nintents the AI can act on:\n{:?}", self.intent)
-        };
-        format!("{}\n\n{}{}", self.date, self.text, hints)
+        format!("{}\n\n{}", self.date, self.text)
     }
 
     fn group(&self, _lens: u8) -> String {
-        self.date.get(..10).and_then(parse_date).map(day_heading).unwrap_or_default()
+        self.date
+            .get(..10)
+            .and_then(parse_date)
+            .map(day_heading)
+            .unwrap_or_default()
     }
 
     fn order(&self, _lens: u8) -> String {
@@ -2459,24 +2698,30 @@ impl Record for DiaryLine {
     }
 
     fn keys(_lens: u8) -> &'static str {
-        ""
+        "" // lines are written in the box, not added, edited or deleted
     }
 }
 
 // ===========================================================================
-// 12. CALENDAR
+// 12. CALENDAR: a month, one row per day. The day bar shows the SELECTED day.
 // ===========================================================================
 
+// The calendar tab is its own Module, not a Record: its rows are the days of one month, and the
+// detail pane draws a month grid.
 struct CalendarModule {
     events: Shared<CalEvent>,
-    month_offset: i32,
+    month_offset: i32, // 0 = this month, 1 = next month, -1 = last month
 }
 
 impl CalendarModule {
     fn new(events: &Shared<CalEvent>) -> Self {
-        CalendarModule { events: Rc::clone(events), month_offset: 0 }
+        CalendarModule {
+            events: Rc::clone(events),
+            month_offset: 0,
+        }
     }
 
+    // First day of the month being shown (moved by month_offset).
     fn first_of_month(&self) -> NaiveDate {
         let first = today().with_day(1).expect("every month has a day 1");
         let shifted = if self.month_offset >= 0 {
@@ -2494,6 +2739,7 @@ impl CalendarModule {
         }
     }
 
+    // events that touch one date (including ones that started the evening before)
     fn events_on(&self, date: NaiveDate) -> Vec<CalEvent> {
         let store = self.events.borrow();
         let mut list: Vec<CalEvent> = store
@@ -2526,16 +2772,12 @@ impl Module for CalendarModule {
 
     fn day_blocks(&self, date: NaiveDate) -> Vec<(u32, u32)> {
         let store = self.events.borrow();
-        let blocks: Vec<(u32, u32)> = store
-            .items
-            .iter()
-            .flat_map(|e| e.blocks(0, date))
-            .collect();
+        let blocks: Vec<(u32, u32)> = store.items.iter().flat_map(|e| e.blocks(0, date)).collect();
         blocks
     }
 
     fn initial_row(&self) -> usize {
-        today().day0() as usize
+        today().day0() as usize // start on today
     }
 
     fn rows(&self) -> Vec<Row> {
@@ -2557,9 +2799,12 @@ impl Module for CalendarModule {
             .collect()
     }
 
+    // the month as a small grid, then the events of the selected day
     fn detail(&self, id: u64) -> String {
         let first = self.first_of_month();
-        let Some(date) = first.with_day(id as u32) else { return String::new() };
+        let Some(date) = first.with_day(id as u32) else {
+            return String::new();
+        };
         let now = today();
 
         let mut out = format!("{}\n\n", first.format("%B %Y"));
@@ -2594,7 +2839,11 @@ impl Module for CalendarModule {
             out.push_str("(nothing planned)\n");
         }
         for e in events {
-            let note = if e.first_day() != date { "  (from the evening before)" } else { "" };
+            let note = if e.first_day() != date {
+                "  (from the evening before)"
+            } else {
+                ""
+            };
             out.push_str(&format!("{}-{}  {}{}\n", e.start, e.end, e.title, note));
         }
         out
@@ -2605,17 +2854,41 @@ impl Module for CalendarModule {
             Action {
                 key: 'a',
                 label: "add event",
-                needs_item: true,
-                prompts: &["Event  (#tag)", "Start (HH:MM)", "End (HH:MM; earlier = next day)"],
+                needs_item: true, // adds to the selected day
+                prompts: &[
+                    "Event  (#tag)",
+                    "Start (HH:MM)",
+                    "End (HH:MM; earlier = next day)",
+                ],
             },
-            Action { key: 'n', label: "next month", needs_item: false, prompts: &[] },
-            Action { key: 'p', label: "prev month", needs_item: false, prompts: &[] },
-            Action { key: 't', label: "this month", needs_item: false, prompts: &[] },
+            Action {
+                key: 'n',
+                label: "next month",
+                needs_item: false,
+                prompts: &[],
+            },
+            Action {
+                key: 'p',
+                label: "prev month",
+                needs_item: false,
+                prompts: &[],
+            },
+            Action {
+                key: 't',
+                label: "this month",
+                needs_item: false,
+                prompts: &[],
+            },
         ]
     }
 
-    fn apply(&mut self, action: char, id: Option<u64>, input: &[String], log: &mut Logger)
-        -> String {
+    fn apply(
+        &mut self,
+        action: char,
+        id: Option<u64>,
+        input: &[String],
+        log: &mut Logger,
+    ) -> String {
         match action {
             'n' | 'p' | 't' => {
                 match action {
@@ -2626,7 +2899,9 @@ impl Module for CalendarModule {
                 format!("Showing {}.", self.first_of_month().format("%B %Y"))
             }
             'a' => {
-                let Some(day) = id else { return "Nothing selected.".to_string() };
+                let Some(day) = id else {
+                    return "Nothing selected.".to_string();
+                };
                 let Some(date) = self.first_of_month().with_day(day as u32) else {
                     return "No such day.".to_string();
                 };
@@ -2654,7 +2929,16 @@ impl Module for CalendarModule {
 }
 
 // ===========================================================================
-// 13. THE AI: two roles, both local, both ask-first
+// 13. THE AI TAB
+//
+// The assistant never changes anything on its own. It writes proposals, one
+// question each. Yes runs the proposed action exactly as if you had pressed
+// the key yourself (so it is logged the same way). No is remembered, so it is
+// never asked again. proposals.json is a record of every yes and no.
+//
+// An Advisor is anything that looks at your data and proposes actions. Rules
+// is the built-in one. A local model trained on your own writing plugs in here
+// by implementing Advisor; nothing else has to change.
 // ===========================================================================
 
 #[derive(Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -2664,16 +2948,17 @@ enum Verdict {
     No,
 }
 
+// One question the assistant asked, with the action it will run on a yes.
 #[derive(Clone, Serialize, Deserialize)]
 struct Proposal {
     id: u64,
-    key: String,
-    ask: String,
-    why: String,
-    module: String,
-    action: char,
+    key: String,    // identifies the idea, so the same one is never asked twice
+    ask: String,    // the question: "Mark X as done?"
+    why: String,    // what the assistant noticed
+    module: String, // which tab the action runs on
+    action: char,   // which key it presses there
     item: Option<u64>,
-    input: Vec<String>,
+    input: Vec<String>, // what it types for that key's prompts
     status: Verdict,
     made: String,
     #[serde(default)]
@@ -2693,27 +2978,8 @@ impl Entry for Proposal {
     }
 }
 
-#[derive(Clone, Serialize, Deserialize)]
-struct ChatMsg {
-    id: u64,
-    you: String,
-    companion: String,
-    when: String,
-}
-
-impl Entry for ChatMsg {
-    const FILE: &'static str = "chat.json";
-    fn id(&self) -> u64 {
-        self.id
-    }
-    fn title(&self) -> &str {
-        &self.you
-    }
-    fn body(&self) -> &str {
-        &self.companion
-    }
-}
-
+// What an Advisor returns: a proposal not yet stored (no id or status). `key` makes sure the same
+// idea is never asked twice.
 struct Idea {
     key: String,
     ask: String,
@@ -2724,43 +2990,35 @@ struct Idea {
     input: Vec<String>,
 }
 
+// Anything that can propose actions. To add another (even a local model), implement this and push
+// it into AiModule::new.
 trait Advisor {
-    fn advise(
-        &self,
-        todos: &[Todo],
-        habits: &[Habit],
-        diary: &[DiaryLine],
-        now: NaiveDateTime,
-    ) -> Vec<Idea>;
+    fn advise(&self, view: &View, now: NaiveDateTime) -> Vec<Idea>;
 }
 
-// The narrative half. Read-only over the diary.
-trait Companion {
-    fn reflect(&self, diary: &[DiaryLine], question: &str) -> String;
-    fn summarize_day(&self, diary: &[DiaryLine], date: NaiveDate) -> Option<String>;
+// What an advisor is allowed to look at: the todos and the diary lines (read only).
+struct View<'a> {
+    todos: &'a [Todo],
+    diary: &'a [DiaryLine],
 }
 
-// ---- Curator: rules today, a local model tomorrow -------------------------
+// Plain rules, no model needed.
+struct Rules;
 
-struct Curator;
-
-impl Advisor for Curator {
-    fn advise(
-        &self,
-        todos: &[Todo],
-        habits: &[Habit],
-        diary: &[DiaryLine],
-        now: NaiveDateTime,
-    ) -> Vec<Idea> {
+impl Advisor for Rules {
+    fn advise(&self, view: &View, now: NaiveDateTime) -> Vec<Idea> {
         let mut ideas = Vec::new();
-
-        for todo in todos.iter().filter(|t| !t.is_done) {
+        for todo in view.todos.iter().filter(|t| !t.is_done) {
+            // a cube whose time on the timeline is over
             if let Some(end) = todo.slot_end() {
                 if end <= now {
                     ideas.push(Idea {
                         key: format!("cube-ended:{}:{}", todo.id, todo.slot),
                         ask: format!("Mark \"{}\" as done?", todo.header),
-                        why: format!("Its timeline slot ended at {}.", end.format("%Y-%m-%d %H:%M")),
+                        why: format!(
+                            "It was on the timeline at {} and that time is over.",
+                            todo.slot
+                        ),
                         module: "todo",
                         action: 'x',
                         item: Some(todo.id),
@@ -2768,6 +3026,7 @@ impl Advisor for Curator {
                     });
                 }
             }
+            // a main todo that has sat for a month
             if let Some(days) = todo.age_days() {
                 if todo.group == Group::Main && days >= 30 {
                     ideas.push(Idea {
@@ -2782,145 +3041,265 @@ impl Advisor for Curator {
                 }
             }
         }
+        ideas
+    }
+}
 
-        for line in diary {
-            for (i, intent) in line.intent.iter().enumerate() {
-                match intent {
-                    Intent::Todo { title, group } => {
-                        let suffix = if *group == Group::Main {
-                            String::new()
-                        } else {
-                            format!(" @{}", group.word())
-                        };
-                        ideas.push(Idea {
-                            key: format!("diary-todo:{}:{}", line.id, i),
-                            ask: format!("Add \"{}\" to your {} todos?", title, group.word()),
-                            why: format!("You wrote: \"{}\"", line.text),
-                            module: "todo",
-                            action: 'a',
-                            item: None,
-                            input: vec![format!("{}{}", title, suffix)],
-                        });
-                    }
-                    Intent::Event { title, date, start, end } => {
-                        ideas.push(Idea {
-                            key: format!("diary-event:{}:{}", line.id, i),
-                            ask: format!("Put \"{}\" {}–{} in the agenda?", title, start, end),
-                            why: format!("You wrote: \"{}\"", line.text),
-                            module: "agenda",
-                            action: 'a',
-                            item: None,
-                            input: vec![title.clone(), date.clone(), start.clone(), end.clone()],
-                        });
-                    }
-                    Intent::HabitCount { title, delta } => {
-                        let lower = title.to_lowercase();
-                        if let Some(habit) = habits
-                            .iter()
-                            .find(|h| h.title.to_lowercase().starts_with(&lower))
-                        {
-                            for k in 1..=*delta {
-                                ideas.push(Idea {
-                                    key: format!("diary-habit:{}:{}:{}", line.id, habit.id, k),
-                                    ask: format!("Count {} on \"{}\"?", k, habit.title),
-                                    why: format!("You wrote: \"{}\"", line.text),
-                                    module: "habit",
-                                    action: '+',
-                                    item: Some(habit.id),
-                                    input: Vec::new(),
-                                });
-                            }
-                        }
-                    }
-                    Intent::Done { title } => {
-                        let lower = title.to_lowercase();
-                        if let Some(todo) = todos
-                            .iter()
-                            .find(|t| !t.is_done && t.header.to_lowercase() == lower)
-                        {
-                            ideas.push(Idea {
-                                key: format!("diary-done:{}:{}", line.id, todo.id),
-                                ask: format!("Mark \"{}\" as done?", todo.header),
-                                why: format!("You wrote: \"{}\"", line.text),
-                                module: "todo",
-                                action: 'x',
-                                item: Some(todo.id),
-                                input: Vec::new(),
-                            });
-                        }
-                    }
-                }
+// ---------------------------------------------------------------------------
+// 13a. RBIP: the rule-based intent parser, layer 1
+//
+// It reads diary lines and gives each sentence a meaning from a small library that ships with the
+// app. Nothing is guessed and nothing is learned yet: a sentence either fits a rule or it doesn't.
+//
+// Layer 1 does two things:
+//   1. splits a line into sentences and tags each one past or present;
+//   2. checks each sentence against the library's patterns. A pattern like "add todo <todo>."
+//      means: the sentence starts with "add todo", the words after it are the <todo>, and the
+//      sentence ends with a period.
+// A match changes nothing by itself. The Intent advisor below turns it into a question in the AI
+// tab, and only your yes runs it.
+// ---------------------------------------------------------------------------
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum Tense {
+    Past,
+    Present,
+}
+
+impl Tense {
+    fn word(self) -> &'static str {
+        match self {
+            Tense::Past => "past",
+            Tense::Present => "present",
+        }
+    }
+}
+
+// ----- the library (data that ships with the app; grow it by adding rows) -----
+
+// A word is past tense if it is in this list ...
+const PAST_WORDS: &[&str] = &[
+    "was", "were", "had", "did", "went", "came", "saw", "got", "made", "took", "gave", "ate",
+    "said", "told", "found", "left", "felt", "wrote", "met", "paid", "sent", "sat", "stood",
+    "lost", "won", "kept", "knew", "thought", "brought", "bought", "forgot", "slept", "spoke",
+    "ran", "drove", "woke", "read",
+];
+// ... or if it ends in "ed" and is long enough (so "need" and "red" don't count) and isn't one of
+// the few common words that only look past.
+const PAST_ENDING: &str = "ed";
+const PAST_MIN_LETTERS: usize = 5;
+const LOOKS_PAST_BUT_ISNT: &[&str] =
+    &["speed", "indeed", "hundred", "proceed", "succeed", "exceed"];
+
+// A pattern the parser knows. The only one so far makes a todo.
+struct Pattern {
+    template: &'static str, // words to match, then the <slot>, then the end mark
+    question: &'static str, // what the AI asks; {} becomes the words in the slot
+    module: &'static str,   // which tab does the work
+    action: char,           // which key it presses there
+}
+
+const LIBRARY: &[Pattern] = &[Pattern {
+    template: "add todo <todo>.",
+    question: "Add todo \"{}\"?",
+    module: "todo",
+    action: 'a',
+}];
+
+// ----- the parser (no other part of the app is needed for these) -----
+
+// One sentence of a diary line: its words (spaces tidied) and the mark that ended it, if any.
+#[derive(Debug)]
+struct Sentence {
+    text: String,
+    end: Option<char>, // '.', '!' or '?'; None when the line stopped without one
+}
+
+fn push_sentence(out: &mut Vec<Sentence>, raw: &str, end: Option<char>) {
+    let words: Vec<&str> = raw.split_whitespace().collect();
+    if !words.is_empty() {
+        out.push(Sentence {
+            text: words.join(" "),
+            end,
+        });
+    }
+}
+
+// "Went out. add todo buy 2.5 kg rice." -> two sentences. A point between two digits is part of a
+// number, not the end of a sentence.
+fn split_sentences(text: &str) -> Vec<Sentence> {
+    let chars: Vec<char> = text.chars().collect();
+    let mut out: Vec<Sentence> = Vec::new();
+    let mut current = String::new();
+    for (i, &c) in chars.iter().enumerate() {
+        let in_number = c == '.'
+            && i > 0
+            && chars[i - 1].is_ascii_digit()
+            && chars.get(i + 1).map_or(false, |next| next.is_ascii_digit());
+        if matches!(c, '.' | '!' | '?') && !in_number {
+            push_sentence(&mut out, &current, Some(c));
+            current.clear();
+        } else {
+            current.push(c);
+        }
+    }
+    push_sentence(&mut out, &current, None);
+    out
+}
+
+fn is_past_word(word: &str) -> bool {
+    PAST_WORDS.contains(&word)
+        || (word.chars().count() >= PAST_MIN_LETTERS
+            && word.ends_with(PAST_ENDING)
+            && !LOOKS_PAST_BUT_ISNT.contains(&word))
+}
+
+// Past if any word is past, otherwise present.
+fn tense_of(text: &str) -> Tense {
+    let past = text
+        .split_whitespace()
+        .map(|w| {
+            w.trim_matches(|c: char| !c.is_alphanumeric())
+                .to_lowercase()
+        })
+        .any(|w| is_past_word(&w));
+    if past {
+        Tense::Past
+    } else {
+        Tense::Present
+    }
+}
+
+// "add todo <todo>." -> ("add todo ", "."): what must come first, and the end mark.
+fn split_template(template: &str) -> Option<(&str, &str)> {
+    let open = template.find('<')?;
+    let close = template.find('>')?;
+    if close < open {
+        return None;
+    }
+    Some((&template[..open], &template[close + 1..]))
+}
+
+// If the sentence fits the template, the words that fill the <slot>.
+fn fill_slot(template: &str, sentence: &Sentence) -> Option<String> {
+    let (lead, tail) = split_template(template)?;
+    let start = sentence.text.get(..lead.len())?;
+    if !start.eq_ignore_ascii_case(lead) {
+        return None;
+    }
+    if sentence.end != tail.chars().next() {
+        return None; // wrong (or missing) end mark: "add todo go walk" without a period is not a command
+    }
+    let slot = sentence.text[lead.len()..].trim();
+    if slot.is_empty() {
+        None
+    } else {
+        Some(slot.to_string())
+    }
+}
+
+// A sentence with what the parser found out about it.
+#[derive(Debug)]
+struct Parsed {
+    sentence: Sentence,
+    tense: Tense,
+    hit: Option<(usize, String)>, // (which LIBRARY pattern, the words in its slot)
+}
+
+fn parse_line(text: &str) -> Vec<Parsed> {
+    split_sentences(text)
+        .into_iter()
+        .map(|sentence| {
+            let hit = LIBRARY
+                .iter()
+                .enumerate()
+                .find_map(|(i, p)| fill_slot(p.template, &sentence).map(|slot| (i, slot)));
+            // For a command only the words before the slot say the tense: "add todo return
+            // borrowed book." is a command now, whatever the todo is about.
+            let tense = match &hit {
+                Some((i, _)) => tense_of(split_template(LIBRARY[*i].template).map_or("", |t| t.0)),
+                None => tense_of(&sentence.text),
+            };
+            Parsed {
+                sentence,
+                tense,
+                hit,
+            }
+        })
+        .collect()
+}
+
+// ----- the advisor -----
+
+// Turns every library match in the diary into a question for the AI tab. The key holds the line's
+// id and date and the sentence's number, so each sentence is asked about once.
+struct Intent;
+
+impl Advisor for Intent {
+    fn advise(&self, view: &View, _now: NaiveDateTime) -> Vec<Idea> {
+        let mut ideas = Vec::new();
+        for line in view.diary {
+            for (n, parsed) in parse_line(&line.text).into_iter().enumerate() {
+                let Some((which, slot)) = parsed.hit else {
+                    continue;
+                };
+                let pattern = &LIBRARY[which];
+                ideas.push(Idea {
+                    key: format!("diary:{}:{}:{}", line.id, line.date, n),
+                    ask: pattern.question.replace("{}", &slot),
+                    why: format!(
+                        "Your diary line from {} has the sentence \"{}\". It is {} tense and fits the pattern \"{}\".",
+                        line.date,
+                        parsed.sentence.text,
+                        parsed.tense.word(),
+                        pattern.template
+                    ),
+                    module: pattern.module,
+                    action: pattern.action,
+                    item: None,
+                    input: vec![slot],
+                });
             }
         }
         ideas
     }
 }
 
-// ---- Companion: a stub you replace with a real local model ---------------
-
-struct LocalModelCompanion;
-
-impl Companion for LocalModelCompanion {
-    fn reflect(&self, diary: &[DiaryLine], question: &str) -> String {
-        let recent: Vec<&str> = diary.iter().rev().take(5).map(|d| d.text.as_str()).collect();
-        format!(
-            "(no local model connected yet)\n\
-             you asked: {question}\n\
-             last {} diary lines:\n  - {}\n\n\
-             plug a llama.cpp / ollama handle into Companion::reflect and this becomes a real answer.",
-            recent.len(),
-            recent.join("\n  - ")
-        )
-    }
-
-    fn summarize_day(&self, _diary: &[DiaryLine], _date: NaiveDate) -> Option<String> {
-        None
-    }
-}
-
-// ---- The AI tab ----------------------------------------------------------
-
+// The AI tab. Holds the proposals, the todos and the diary for advisors to read, and approved
+// requests waiting for the app to run them.
 struct AiModule {
     store: Store<Proposal>,
-    chat: Store<ChatMsg>,
     todos: Shared<Todo>,
-    habits: Shared<Habit>,
     diary: Shared<DiaryLine>,
-    curator: Vec<Box<dyn Advisor>>,
-    companion: Box<dyn Companion>,
-    chat_view: bool,
-    last_summary: String,
-    out: Vec<Request>,
+    advisors: Vec<Box<dyn Advisor>>,
+    out: Vec<Request>, // approved actions waiting to be run by the app
 }
 
 impl AiModule {
-    fn new(todos: &Shared<Todo>, diary: &Shared<DiaryLine>, habits: &Shared<Habit>) -> Self {
-        let last_summary = fs::read_to_string(data_path("last_summary.txt"))
-            .map(|s| s.trim().to_string())
-            .unwrap_or_default();
+    fn new(todos: &Shared<Todo>, diary: &Shared<DiaryLine>) -> Self {
         AiModule {
             store: Store::load(),
-            chat: Store::load(),
             todos: Rc::clone(todos),
-            habits: Rc::clone(habits),
             diary: Rc::clone(diary),
-            curator: vec![Box::new(Curator)],
-            companion: Box::new(LocalModelCompanion),
-            chat_view: false,
-            last_summary,
+            advisors: vec![Box::new(Rules), Box::new(Intent)],
             out: Vec::new(),
         }
     }
 
+    // Asks every advisor for ideas. An idea already asked before (yes, no, or
+    // still waiting) is skipped. Returns how many new questions were added.
     fn think(&mut self) -> usize {
         let now = Local::now().naive_local();
         let mut ideas: Vec<Idea> = Vec::new();
         {
             let todos = self.todos.borrow();
-            let habits = self.habits.borrow();
             let diary = self.diary.borrow();
-            for advisor in &self.curator {
-                ideas.extend(advisor.advise(&todos.items, &habits.items, &diary.items, now));
+            let view = View {
+                todos: &todos.items,
+                diary: &diary.items,
+            };
+            for advisor in &self.advisors {
+                ideas.extend(advisor.advise(&view, now));
             }
         }
         let mut added = 0;
@@ -2949,28 +3328,6 @@ impl AiModule {
         }
         added
     }
-
-    fn summarize_if_needed(&mut self) {
-        let today_str = today_text();
-        if self.last_summary == today_str {
-            return;
-        }
-        let summary = {
-            let diary = self.diary.borrow();
-            self.companion.summarize_day(&diary.items, today())
-        };
-        if let Some(summary) = summary {
-            let mut store = self.diary.borrow_mut();
-            let id = store.next_id();
-            if let Some(line) = DiaryLine::from_line(id, &format!("#companion {summary}"), "") {
-                store.items.push(line);
-                store.save();
-            }
-            drop(store);
-            self.last_summary = today_str.clone();
-            let _ = fs::write(data_path("last_summary.txt"), &today_str);
-        }
-    }
 }
 
 impl Module for AiModule {
@@ -2979,22 +3336,16 @@ impl Module for AiModule {
     }
 
     fn heading(&self) -> String {
-        if self.chat_view {
-            return format!("ai · companion chat · {} messages", self.chat.items.len());
-        }
-        let waiting = self.store.items.iter().filter(|p| p.status == Verdict::Pending).count();
+        let waiting = self
+            .store
+            .items
+            .iter()
+            .filter(|p| p.status == Verdict::Pending)
+            .count();
         format!("ai · {} waiting for you", waiting)
     }
 
     fn rows(&self) -> Vec<Row> {
-        if self.chat_view {
-            return self
-                .chat
-                .items
-                .iter()
-                .map(|c| Row::new(c.id, format!("you: {}", truncate(&c.you, 60))))
-                .collect();
-        }
         let mut list: Vec<(String, Row)> = self
             .store
             .items
@@ -3013,28 +3364,22 @@ impl Module for AiModule {
                         format!("1{}", desc_key(&format!("{}{:012}", p.decided, p.id))),
                     ),
                 };
-                (
-                    order,
-                    Row {
-                        id: p.id,
-                        label: format!("[{mark}] {}", p.ask),
-                        group: group.to_string(),
-                    },
-                )
+                let row = Row {
+                    id: p.id,
+                    label: format!("[{}] {}", mark, p.ask),
+                    group: group.to_string(),
+                };
+                (order, row)
             })
             .collect();
         list.sort_by(|a, b| a.0.cmp(&b.0));
-        list.into_iter().map(|(_, r)| r).collect()
+        list.into_iter().map(|(_, row)| row).collect()
     }
 
     fn detail(&self, id: u64) -> String {
-        if self.chat_view {
-            let Some(msg) = self.chat.items.iter().find(|c| c.id == id) else {
-                return String::new();
-            };
-            return format!("{}\n\nyou: {}\n\ncompanion: {}\n", msg.when, msg.you, msg.companion);
-        }
-        let Some(p) = self.store.get(id) else { return String::new() };
+        let Some(p) = self.store.get(id) else {
+            return String::new();
+        };
         let status = match p.status {
             Verdict::Pending => "waiting for your answer".to_string(),
             Verdict::Yes => format!("you said yes ({})", p.decided),
@@ -3059,91 +3404,86 @@ impl Module for AiModule {
     }
 
     fn actions(&self) -> Vec<Action> {
-        if self.chat_view {
-            vec![
-                Action {
-                    key: 'g',
-                    label: "send",
-                    needs_item: false,
-                    prompts: &["Message to the companion"],
-                },
-                Action { key: 'c', label: "questions", needs_item: false, prompts: &[] },
-            ]
-        } else {
-            vec![
-                Action { key: 'y', label: "yes", needs_item: true, prompts: &[] },
-                Action { key: 'n', label: "no", needs_item: true, prompts: &[] },
-                Action { key: 'r', label: "think now", needs_item: false, prompts: &[] },
-                Action { key: 'c', label: "companion chat", needs_item: false, prompts: &[] },
-            ]
-        }
+        vec![
+            Action {
+                key: 'y',
+                label: "yes",
+                needs_item: true,
+                prompts: &[],
+            },
+            Action {
+                key: 'n',
+                label: "no",
+                needs_item: true,
+                prompts: &[],
+            },
+            Action {
+                key: 'r',
+                label: "think now",
+                needs_item: false,
+                prompts: &[],
+            },
+        ]
     }
 
-    fn apply(&mut self, key: char, id: Option<u64>, input: &[String], log: &mut Logger) -> String {
-        if key == 'c' {
-            self.chat_view = !self.chat_view;
-            return if self.chat_view { "companion chat".to_string() } else { "questions".to_string() };
-        }
-
-        if key == 'g' && self.chat_view {
-            let question = input.first().map(|s| s.trim().to_string()).unwrap_or_default();
-            if question.is_empty() {
-                return "Nothing to send.".to_string();
-            }
-            let reply = {
-                let diary = self.diary.borrow();
-                self.companion.reflect(&diary.items, &question)
-            };
-            let id = self.chat.next_id();
-            self.chat.items.push(ChatMsg {
-                id,
-                you: question,
-                companion: reply,
-                when: Local::now().format("%Y-%m-%d %H:%M").to_string(),
-            });
-            self.chat.save();
-            return "Sent.".to_string();
-        }
-
-        if key == 'r' && !self.chat_view {
-            let added = self.think();
-            return if added == 0 {
-                "Nothing new to suggest.".to_string()
-            } else {
-                format!("{added} new question(s).")
-            };
-        }
-
-        if (key == 'y' || key == 'n') && !self.chat_view {
-            let Some(id) = id else { return "Nothing selected.".to_string() };
-            let (module, action, item, input_, title) = {
-                let Some(p) = self.store.get_mut(id) else {
-                    return "No such question.".to_string();
-                };
-                if p.status != Verdict::Pending {
-                    return "Already answered.".to_string();
+    // y = approve (queued as a Request that App::flush runs like a real key press), n = refuse for
+    // good, r = ask the advisors now.
+    fn apply(&mut self, key: char, id: Option<u64>, _input: &[String], log: &mut Logger) -> String {
+        match key {
+            'r' => {
+                let added = self.think();
+                if added == 0 {
+                    "Nothing new to suggest.".to_string()
+                } else {
+                    format!("{} new question(s).", added)
                 }
-                p.status = if key == 'y' { Verdict::Yes } else { Verdict::No };
-                p.decided = Local::now().format("%Y-%m-%d %H:%M").to_string();
-                (p.module.clone(), p.action, p.item, p.input.clone(), p.ask.clone())
-            };
-            self.store.save();
-            if key == 'y' {
-                self.out.push(Request { module, key: action, item, input: input_ });
-                log.log("ai", Kind::Approved, id, &title);
-                format!("Yes: {title}")
-            } else {
-                log.log("ai", Kind::Rejected, id, &title);
-                format!("No: {title} (won't be asked again)")
             }
-        } else {
-            String::new()
+            'y' | 'n' => {
+                let Some(id) = id else {
+                    return "Nothing selected.".to_string();
+                };
+                let (module, action, item, input, title) = {
+                    let Some(p) = self.store.get_mut(id) else {
+                        return "No such question.".to_string();
+                    };
+                    if p.status != Verdict::Pending {
+                        return "Already answered.".to_string();
+                    }
+                    p.status = if key == 'y' {
+                        Verdict::Yes
+                    } else {
+                        Verdict::No
+                    };
+                    p.decided = Local::now().format("%Y-%m-%d %H:%M").to_string();
+                    (
+                        p.module.clone(),
+                        p.action,
+                        p.item,
+                        p.input.clone(),
+                        p.ask.clone(),
+                    )
+                };
+                self.store.save();
+                if key == 'y' {
+                    self.out.push(Request {
+                        module,
+                        key: action,
+                        item,
+                        input,
+                    });
+                    log.log("ai", Kind::Approved, id, &title);
+                    format!("Yes: {}", title)
+                } else {
+                    log.log("ai", Kind::Rejected, id, &title);
+                    format!("No: {} (won't be asked again)", title)
+                }
+            }
+            _ => String::new(),
         }
     }
 
     fn tick(&mut self, _log: &mut Logger) {
         self.think();
-        self.summarize_if_needed();
     }
 
     fn outbox(&mut self) -> Vec<Request> {
@@ -3152,158 +3492,19 @@ impl Module for AiModule {
 }
 
 // ===========================================================================
-// 13b. SETTINGS: toggle which modules are visible on the next start
-// ===========================================================================
-
-const ALL_MODULES: &[(&str, &str)] = &[
-    ("todo",     "the main list, grouped and calm"),
-    ("done",     "finished todos, newest first"),
-    ("cubes",    "open todos as sized timeline blocks"),
-    ("daily",    "recurring things on chosen weekdays"),
-    ("habit",    "habits to build and to quit"),
-    ("agenda",   "events with times, past and upcoming"),
-    ("calendar", "a month grid; day bar for the selected day"),
-    ("dict",     "your own dictionary of pages"),
-];
-
-const ALWAYS_ON: &[&str] = &["diary", "ai", "settings"];
-
-fn default_enabled() -> Vec<String> {
-    ALL_MODULES.iter().map(|(n, _)| n.to_string()).collect()
-}
-
-#[derive(Clone, Serialize, Deserialize)]
-struct Settings {
-    #[serde(default = "default_enabled")]
-    enabled: Vec<String>,
-}
-
-impl Settings {
-    fn load() -> Self {
-        fs::read_to_string(data_path("settings.json"))
-            .ok()
-            .and_then(|t| serde_json::from_str(&t).ok())
-            .unwrap_or_else(|| Settings { enabled: default_enabled() })
-    }
-    fn save(&self) {
-        if let Ok(text) = serde_json::to_string_pretty(self) {
-            let _ = fs::write(data_path("settings.json"), text);
-        }
-    }
-}
-
-struct SettingsModule {
-    settings: Settings,
-}
-
-impl SettingsModule {
-    fn new(settings: Settings) -> Self {
-        SettingsModule { settings }
-    }
-}
-
-impl Module for SettingsModule {
-    fn name(&self) -> &'static str {
-        "settings"
-    }
-
-    fn heading(&self) -> String {
-        let on = ALL_MODULES
-            .iter()
-            .filter(|(n, _)| self.settings.enabled.iter().any(|e| e == n))
-            .count();
-        format!("settings · {on}/{} on · changes apply on restart", ALL_MODULES.len())
-    }
-
-    fn rows(&self) -> Vec<Row> {
-        ALL_MODULES
-            .iter()
-            .enumerate()
-            .map(|(i, (name, about))| {
-                let on = self.settings.enabled.iter().any(|e| e == name);
-                let mark = if ALWAYS_ON.contains(name) {
-                    "·"
-                } else if on {
-                    "x"
-                } else {
-                    " "
-                };
-                Row::new(i as u64, format!("[{mark}] {name:<10} {about}"))
-            })
-            .collect()
-    }
-
-    fn detail(&self, id: u64) -> String {
-        let Some((name, about)) = ALL_MODULES.get(id as usize) else {
-            return String::new();
-        };
-        let on = self.settings.enabled.iter().any(|e| e == name);
-        let always = ALWAYS_ON.contains(name);
-        let state = if always { "always on" } else if on { "on" } else { "off" };
-        let action = if always {
-            "this tab can't be turned off — the diary is the input and the AI reads it"
-        } else {
-            "press 't' to toggle · restart the app to apply"
-        };
-        format!("{name}\n\n{about}\n\nstate: {state}\n\n{action}")
-    }
-
-    fn actions(&self) -> Vec<Action> {
-        vec![
-            Action { key: 't', label: "toggle", needs_item: true, prompts: &[] },
-            Action { key: 'o', label: "all on", needs_item: false, prompts: &[] },
-            Action { key: 'f', label: "all off", needs_item: false, prompts: &[] },
-        ]
-    }
-
-    fn apply(&mut self, key: char, id: Option<u64>, _input: &[String], _log: &mut Logger) -> String {
-        match key {
-            't' => {
-                let Some(id) = id else { return "Nothing selected.".to_string() };
-                let Some((name, _)) = ALL_MODULES.get(id as usize) else {
-                    return "No such module.".to_string();
-                };
-                if ALWAYS_ON.contains(name) {
-                    return format!("{name} is always on.");
-                }
-                let name = name.to_string();
-                match self.settings.enabled.iter().position(|e| e == &name) {
-                    Some(p) => {
-                        self.settings.enabled.remove(p);
-                    }
-                    None => {
-                        self.settings.enabled.push(name.clone());
-                    }
-                }
-                self.settings.save();
-                format!("{name} toggled (restart to apply).")
-            }
-            'o' => {
-                self.settings.enabled = default_enabled();
-                self.settings.save();
-                "All modules on (restart to apply).".to_string()
-            }
-            'f' => {
-                self.settings.enabled.clear();
-                self.settings.save();
-                "All optional modules off (restart to apply).".to_string()
-            }
-            _ => String::new(),
-        }
-    }
-}
-
-// ===========================================================================
 // 14. THE RATATUI INTERFACE
 // ===========================================================================
 
+// One search result: its score, which tab it came from and its row.
 struct SearchHit {
     score: i32,
-    module: usize,
+    module: usize, // index into App::modules
     id: u64,
     label: String,
 }
 
+// What the keyboard is doing. Normal: keys are commands. Input: answering the prompts of an
+// action, one at a time (`answers` so far, `buffer` is the text being typed).
 enum Mode {
     Normal,
     Input {
@@ -3316,32 +3517,38 @@ enum Mode {
     },
 }
 
+// The whole program state: the tabs, the shared history logger, which tab and row are selected,
+// and the current typing mode.
 struct App {
     modules: Vec<Box<dyn Module>>,
     log: Logger,
-    tab: usize,
-    selected: Vec<usize>,
+    tab: usize, // 0..modules.len() are the parts; modules.len() is the search tab
+    selected: Vec<usize>, // selected row per module
     search_query: String,
     search_hits: Vec<SearchHit>,
     search_sel: usize,
     mode: Mode,
     status: String,
-    line_buffer: String,
+    line_buffer: String, // what is being typed on a line tab (the diary)
     quit: bool,
 }
 
+// One line of inbox.jsonl, as written by the browser panel.
 #[derive(Clone, Serialize, Deserialize)]
 struct InboxLine {
-    module: String,
+    module: String, // "diary", "todo" or "timetable"
     text: String,
     #[serde(default)]
-    at: String,
+    at: String, // "YYYY-MM-DD HH:MM" it was typed
     #[serde(default)]
-    why: String,
+    why: String, // filled in only when the line was refused
 }
 
+// Lines that couldn't be added are kept, with the reason, instead of being lost.
 fn keep_rejected(entry: &InboxLine) {
-    let Ok(line) = serde_json::to_string(entry) else { return };
+    let Ok(line) = serde_json::to_string(entry) else {
+        return;
+    };
     if let Ok(mut file) = fs::OpenOptions::new()
         .create(true)
         .append(true)
@@ -3351,6 +3558,9 @@ fn keep_rejected(entry: &InboxLine) {
     }
 }
 
+// "14:00-15:30 Dentist #health" or "2026-10-30 14:00-15:30 Dentist"
+// -> [title, date, start, end], the answers the agenda's add asks for.
+// No date means today. Anything else isn't an event and returns None.
 fn parse_timetable(text: &str) -> Option<[String; 4]> {
     let mut words = text.split_whitespace().peekable();
     let mut date = String::new();
@@ -3370,6 +3580,7 @@ fn parse_timetable(text: &str) -> Option<[String; 4]> {
     Some([title, date, start.to_string(), end.to_string()])
 }
 
+// the last `room` characters of what is being typed, so the cursor stays visible
 fn tail(text: &str, room: usize) -> String {
     let chars: Vec<char> = text.chars().collect();
     chars[chars.len().saturating_sub(room)..].iter().collect()
@@ -3377,39 +3588,24 @@ fn tail(text: &str, room: usize) -> String {
 
 impl App {
     fn new() -> Self {
+        // Adding a tab = implement Record (or Module) for it + one line here.
+        // Tabs that share a file share one store: todo, done and cubes look at
+        // todos.json; agenda and calendar look at events.json.
         let todos: Shared<Todo> = share();
-        let dailies: Shared<Daily> = share();
-        let habits: Shared<Habit> = share();
         let events: Shared<CalEvent> = share();
-        let pages: Shared<Page> = share();
-        let diary: Shared<DiaryLine> = share();
-
-        let settings = Settings::load();
-        let enabled = settings.enabled.clone();
-
-        let all: Vec<(&'static str, Box<dyn Module>)> = vec![
-            ("todo", Box::new(ListModule::new("todo", 0, &todos).with_bar())),
-            ("done", Box::new(ListModule::new("done", 1, &todos).with_bar())),
-            ("cubes", Box::new(ListModule::new("cubes", 2, &todos).with_bar())),
-            ("daily", Box::new(ListModule::new("daily", 0, &dailies).with_bar())),
-            ("habit", Box::new(ListModule::new("habit", 0, &habits))),
-            ("agenda", Box::new(ListModule::new("agenda", 0, &events).with_bar())),
-            ("calendar", Box::new(CalendarModule::new(&events))),
-            ("diary", Box::new(ListModule::new("diary", 0, &diary))),
-            ("dict", Box::new(ListModule::new("dict", 0, &pages))),
-            ("ai", Box::new(AiModule::new(&todos, &diary, &habits))),
+        let diary: Shared<DiaryLine> = share(); // the diary tab writes it, the AI tab reads it
+        let modules: Vec<Box<dyn Module>> = vec![
+            Box::new(ListModule::new("todo", 0, &todos).with_bar()),
+            Box::new(ListModule::new("done", 1, &todos).with_bar()),
+            Box::new(ListModule::new("cubes", 2, &todos).with_bar()),
+            Box::new(ListModule::new("daily", 0, &share::<Daily>()).with_bar()),
+            Box::new(ListModule::new("habit", 0, &share::<Habit>())),
+            Box::new(ListModule::new("agenda", 0, &events).with_bar()),
+            Box::new(CalendarModule::new(&events)),
+            Box::new(ListModule::new("diary", 0, &diary)),
+            Box::new(ListModule::new("dict", 0, &share::<Page>())),
+            Box::new(AiModule::new(&todos, &diary)),
         ];
-
-        let mut modules: Vec<Box<dyn Module>> = Vec::new();
-        for (name, module) in all {
-            if ALWAYS_ON.contains(&name) || enabled.iter().any(|e| e.as_str() == name) {
-                modules.push(module);
-            }
-        }
-        // Settings is always last, so enabling a new module doesn't shift tabs
-        // that already exist in the log.
-        modules.push(Box::new(SettingsModule::new(settings)));
-
         let selected: Vec<usize> = modules.iter().map(|m| m.initial_row()).collect();
         App {
             modules,
@@ -3426,38 +3622,24 @@ impl App {
         }
     }
 
-    fn catch_up(&mut self) {
-        let last = fs::read_to_string(data_path("last_seen.txt"))
-            .ok()
-            .map(|s| s.trim().to_string())
-            .unwrap_or_default();
-        if let Ok(when) = NaiveDateTime::parse_from_str(&last, "%Y-%m-%d %H:%M") {
-            let gap = Local::now().naive_local() - when;
-            if gap.num_hours() >= 1 {
-                self.status = format!(
-                    "Welcome back. Away {}h {}m.",
-                    gap.num_hours(),
-                    gap.num_minutes() % 60
-                );
-            }
-        }
-    }
-
+    // The main loop: draw, wait up to 2 s for a key, check the inbox and do housekeeping when due,
+    // then handle the key.
     fn run(&mut self, terminal: &mut DefaultTerminal) -> std::io::Result<()> {
-        self.catch_up();
-        self.tick_all();
-        self.check_inbox();
+        self.tick_all(); // catch up on whatever happened while the app was closed
+        self.check_inbox(); // and on whatever the browser panel left meanwhile
         let mut last_tick = Instant::now();
         let mut last_inbox = Instant::now();
         while !self.quit {
             terminal.draw(|f| self.draw(f))?;
+            // wake up every 2s even without a key press: entries sent from the
+            // browser show up, and the "now" marker moves
             let key_waiting = event::poll(Duration::from_secs(2))?;
             if last_inbox.elapsed() >= Duration::from_secs(2) {
                 self.check_inbox();
                 last_inbox = Instant::now();
             }
             if last_tick.elapsed() >= Duration::from_secs(30) {
-                self.tick_all();
+                self.tick_all(); // time-based housekeeping
                 last_tick = Instant::now();
             }
             if !key_waiting {
@@ -3473,22 +3655,29 @@ impl App {
                 self.on_key(key.code);
             }
         }
-        let _ = fs::write(
-            data_path("last_seen.txt"),
-            Local::now().format("%Y-%m-%d %H:%M").to_string(),
-        );
         Ok(())
     }
+
+    // ----- the inbox: entries sent by other programs (the browser panel) -----
+    //
+    // The panel never touches our data files (two programs writing one file
+    // would corrupt it). It only appends one line per entry to inbox.jsonl, and
+    // this is the only place those lines are turned into real entries.
 
     fn check_inbox(&mut self) {
         let inbox = data_path("inbox.jsonl");
         let working = data_path("inbox.processing");
+        // The inbox is renamed (an instant, atomic step) so lines the panel adds
+        // while we work go into a fresh inbox. A leftover working file from a
+        // crash is finished first.
         if !working.exists() {
             if !inbox.exists() || fs::rename(&inbox, &working).is_err() {
                 return;
             }
         }
-        let Ok(text) = fs::read_to_string(&working) else { return };
+        let Ok(text) = fs::read_to_string(&working) else {
+            return;
+        };
 
         let (mut added, mut failed) = (0, 0);
         for line in text.lines().filter(|l| !l.trim().is_empty()) {
@@ -3526,6 +3715,8 @@ impl App {
         self.clamp_selection();
     }
 
+    // Turns one inbox line into a real entry: a diary line, a todo or an agenda event. Err = the
+    // reason it was refused.
     fn take_inbox_entry(&mut self, entry: &InboxLine) -> Result<(), String> {
         let text = entry.text.trim();
         if text.is_empty() {
@@ -3536,12 +3727,14 @@ impl App {
             "todo" => self.add_to("todo", vec![text.to_string()]),
             "timetable" => match parse_timetable(text) {
                 Some(fields) => self.add_to("agenda", fields.to_vec()),
+                // not a time range we can read: keep it as a diary note, not lost
                 None => self.add_diary_line(&format!("timetable: {} #timetable", text), &entry.at),
             },
             other => Err(format!("unknown module \"{}\"", other)),
         }
     }
 
+    // Finds the tab that takes typed lines (the diary) and gives it the line.
     fn add_diary_line(&mut self, text: &str, at: &str) -> Result<(), String> {
         let index = self
             .modules
@@ -3554,6 +3747,7 @@ impl App {
             .ok_or_else(|| "the diary refused the line".to_string())
     }
 
+    // Finds a tab by name and adds an entry to it, as if typed with its `a` key.
     fn add_to(&mut self, module: &str, input: Vec<String>) -> Result<(), String> {
         let index = self
             .modules
@@ -3563,6 +3757,8 @@ impl App {
         self.modules[index].add(&input, &mut self.log).map(|_| ())
     }
 
+    // ----- housekeeping and requests between modules -----
+
     fn tick_all(&mut self) {
         for module in self.modules.iter_mut() {
             module.tick(&mut self.log);
@@ -3571,6 +3767,7 @@ impl App {
         self.clamp_selection();
     }
 
+    // Runs what modules asked other modules to do (an approved AI suggestion, say).
     fn flush(&mut self) {
         for _ in 0..4 {
             let mut requests: Vec<Request> = Vec::new();
@@ -3599,12 +3796,17 @@ impl App {
         }
     }
 
+    // ----- selection helpers -----
+
     fn is_search_tab(&self) -> bool {
         self.tab == self.modules.len()
     }
 
+    // Keeps the selected row inside the list after rows were added or removed.
     fn clamp_selection(&mut self) {
-        let Some(module) = self.modules.get(self.tab) else { return };
+        let Some(module) = self.modules.get(self.tab) else {
+            return;
+        };
         let len = module.rows().len();
         let sel = &mut self.selected[self.tab];
         if len == 0 {
@@ -3614,6 +3816,7 @@ impl App {
         }
     }
 
+    // Id of the selected row of the current tab.
     fn selected_id(&self) -> Option<u64> {
         let module = self.modules.get(self.tab)?;
         let rows = module.rows();
@@ -3621,6 +3824,7 @@ impl App {
         id
     }
 
+    // Asks every tab to fuzzy-match the query; best scores first.
     fn run_search(&self, query: &str) -> Vec<SearchHit> {
         if query.is_empty() {
             return Vec::new();
@@ -3628,7 +3832,12 @@ impl App {
         let mut hits = Vec::new();
         for (mi, module) in self.modules.iter().enumerate() {
             for (score, row) in module.search(query) {
-                hits.push(SearchHit { score, module: mi, id: row.id, label: row.label });
+                hits.push(SearchHit {
+                    score,
+                    module: mi,
+                    id: row.id,
+                    label: row.label,
+                });
             }
         }
         hits.sort_by(|a, b| b.score.cmp(&a.score));
@@ -3639,23 +3848,35 @@ impl App {
         self.tab = tab;
         self.status.clear();
         if self.is_search_tab() {
+            // data may have changed since the last visit, so search again
             self.search_hits = self.run_search(&self.search_query);
             self.search_sel = 0;
         } else {
+            // another tab on the same file may have changed the list under us
             self.clamp_selection();
         }
     }
 
+    // ----- input handling -----
+
     fn on_key(&mut self, code: KeyCode) {
+        // take the mode out so we can change self freely, put it back after
         let mode = std::mem::replace(&mut self.mode, Mode::Normal);
         match mode {
             Mode::Normal => self.key_normal(code),
-            Mode::Input { module, action, item, step, answers, buffer } => {
-                self.key_input(code, module, action, item, step, answers, buffer)
-            }
+            Mode::Input {
+                module,
+                action,
+                item,
+                step,
+                answers,
+                buffer,
+            } => self.key_input(code, module, action, item, step, answers, buffer),
         }
     }
 
+    // Keys on an ordinary list tab: move, switch tabs, or start one of the tab's actions by its
+    // key.
     fn key_normal(&mut self, code: KeyCode) {
         if self.is_search_tab() {
             self.key_search_tab(code);
@@ -3665,7 +3886,7 @@ impl App {
             self.key_lines(code);
             return;
         }
-        let count = self.modules.len() + 1;
+        let count = self.modules.len() + 1; // the parts plus the search tab
         match code {
             KeyCode::Char('q') => self.quit = true,
             KeyCode::Tab | KeyCode::Right => self.go_to_tab((self.tab + 1) % count),
@@ -3686,12 +3907,15 @@ impl App {
             }
             KeyCode::Home => self.selected[self.tab] = 0,
             KeyCode::End => {
-                self.selected[self.tab] = usize::MAX;
+                self.selected[self.tab] = usize::MAX; // clamped to the last row
                 self.clamp_selection();
             }
             KeyCode::Char('/') => self.go_to_tab(self.modules.len()),
             KeyCode::Char(c) => {
-                let action = self.modules[self.tab].actions().into_iter().find(|a| a.key == c);
+                let action = self.modules[self.tab]
+                    .actions()
+                    .into_iter()
+                    .find(|a| a.key == c);
                 if let Some(action) = action {
                     self.start_action(action);
                 }
@@ -3700,6 +3924,7 @@ impl App {
         }
     }
 
+    // A line tab (the diary): typing goes straight into the box at the bottom.
     fn key_lines(&mut self, code: KeyCode) {
         let count = self.modules.len() + 1;
         match code {
@@ -3710,6 +3935,7 @@ impl App {
                 let text = std::mem::take(&mut self.line_buffer);
                 if let Some(message) = self.modules[self.tab].line_input(&text, "", &mut self.log) {
                     self.status = message;
+                    self.tick_all(); // lets the AI read the new line now, not in 30 seconds
                 }
             }
             KeyCode::Backspace => {
@@ -3720,6 +3946,8 @@ impl App {
         }
     }
 
+    // Starts an action: with no prompts it runs now; otherwise the input box opens (pre-filled
+    // when editing).
     fn start_action(&mut self, action: Action) {
         let item = self.selected_id();
         if action.needs_item && item.is_none() {
@@ -3744,12 +3972,21 @@ impl App {
         }
     }
 
-    fn finish_action(&mut self, module: usize, action: Action, item: Option<u64>, answers: &[String]) {
+    // All prompts answered: run the action, then run any requests it caused, then fix the
+    // selection.
+    fn finish_action(
+        &mut self,
+        module: usize,
+        action: Action,
+        item: Option<u64>,
+        answers: &[String],
+    ) {
         self.status = self.modules[module].apply(action.key, item, answers, &mut self.log);
         self.flush();
         self.clamp_selection();
     }
 
+    // Keys while answering a prompt. Enter goes to the next prompt or finishes; Esc cancels.
     #[allow(clippy::too_many_arguments)]
     fn key_input(
         &mut self,
@@ -3764,7 +4001,7 @@ impl App {
         match code {
             KeyCode::Esc => {
                 self.status = "Cancelled.".into();
-                return;
+                return; // mode stays Normal
             }
             KeyCode::Char(c) => buffer.push(c),
             KeyCode::Backspace => {
@@ -3781,14 +4018,30 @@ impl App {
                     Some(id) => self.modules[module].initial(action.key, id, step),
                     None => String::new(),
                 };
-                self.mode = Mode::Input { module, action, item, step, answers, buffer };
+                self.mode = Mode::Input {
+                    module,
+                    action,
+                    item,
+                    step,
+                    answers,
+                    buffer,
+                };
                 return;
             }
             _ => {}
         }
-        self.mode = Mode::Input { module, action, item, step, answers, buffer };
+        self.mode = Mode::Input {
+            module,
+            action,
+            item,
+            step,
+            answers,
+            buffer,
+        };
     }
 
+    // The search tab: typing goes straight into the query box, so letters
+    // like q don't act as commands here. Leave with Tab/arrows or Esc.
     fn key_search_tab(&mut self, code: KeyCode) {
         let count = self.modules.len() + 1;
         match code {
@@ -3799,7 +4052,7 @@ impl App {
                 if let Some(hit) = self.search_hits.get(self.search_sel) {
                     let (module, id) = (hit.module, hit.id);
                     self.go_to_tab(module);
-                    self.modules[module].reveal(id);
+                    self.modules[module].reveal(id); // drop any filter that hides it
                     let rows = self.modules[module].rows();
                     if let Some(pos) = rows.iter().position(|r| r.id == id) {
                         self.selected[module] = pos;
@@ -3826,8 +4079,14 @@ impl App {
         }
     }
 
+    // ----- drawing -----
+
     fn draw(&self, f: &mut Frame) {
-        let show_bar = self.modules.get(self.tab).map_or(false, |m| m.shows_day_bar());
+        // the day bar sits just above the key bar, only on tabs that ask for it
+        let show_bar = self
+            .modules
+            .get(self.tab)
+            .map_or(false, |m| m.shows_day_bar());
         let bar_height = if show_bar { 7 } else { 0 };
         let [top, body, daybar, bottom] = Layout::vertical([
             Constraint::Length(3),
@@ -3837,6 +4096,7 @@ impl App {
         ])
         .areas(f.area());
 
+        // tabs
         let mut titles: Vec<&str> = self.modules.iter().map(|m| m.name()).collect();
         titles.push("search");
         let tabs = Tabs::new(titles)
@@ -3845,6 +4105,7 @@ impl App {
             .highlight_style(Style::new().fg(Color::Yellow).add_modifier(Modifier::BOLD));
         f.render_widget(tabs, top);
 
+        // body
         match self.modules.get(self.tab) {
             None => self.draw_search(f, body),
             Some(m) if m.takes_lines() => self.draw_lines(f, body),
@@ -3854,9 +4115,15 @@ impl App {
             self.draw_day_bar(f, daybar);
         }
 
+        // bottom line: prompt, search box or key hints
         let room = (bottom.width as usize).saturating_sub(6);
         let (title, line) = match &self.mode {
-            Mode::Input { action, step, buffer, .. } => {
+            Mode::Input {
+                action,
+                step,
+                buffer,
+                ..
+            } => {
                 let prompt = action.prompts[*step];
                 let space = room.saturating_sub(prompt.chars().count() + 2);
                 (
@@ -3889,9 +4156,13 @@ impl App {
                 }
             },
         };
-        f.render_widget(Paragraph::new(line).block(Block::bordered().title(title)), bottom);
+        f.render_widget(
+            Paragraph::new(line).block(Block::bordered().title(title)),
+            bottom,
+        );
     }
 
+    // The diary: history above, the line being written below, newest at the bottom.
     fn draw_lines(&self, f: &mut Frame, area: Rect) {
         let module = &self.modules[self.tab];
         let rows = module.rows();
@@ -3905,15 +4176,20 @@ impl App {
             if !row.group.is_empty() && row.group != last {
                 items.push(ListItem::new(Line::from(Span::styled(
                     format!("── {} ──", row.group),
-                    Style::new().fg(Color::DarkGray).add_modifier(Modifier::BOLD),
+                    Style::new()
+                        .fg(Color::DarkGray)
+                        .add_modifier(Modifier::BOLD),
                 ))));
                 last = row.group.clone();
             }
             items.push(ListItem::new(row.label.clone()));
         }
-        let skip = items.len().saturating_sub(room);
+        let skip = items.len().saturating_sub(room); // headings can push lines out of room
         let items: Vec<ListItem> = items.into_iter().skip(skip).collect();
-        f.render_widget(List::new(items).block(Block::bordered().title(" diary ")), history);
+        f.render_widget(
+            List::new(items).block(Block::bordered().title(" diary ")),
+            history,
+        );
 
         let space = (input_area.width as usize).saturating_sub(4);
         let input = Paragraph::new(format!("{}█", tail(&self.line_buffer, space))).block(
@@ -3923,14 +4199,17 @@ impl App {
         f.render_widget(input, input_area);
     }
 
+    // A normal tab: the list (with headings) on the left, the selected row's details on the right.
     fn draw_module(&self, f: &mut Frame, area: Rect) {
         let [left, right] =
-            Layout::horizontal([Constraint::Percentage(45), Constraint::Percentage(55)]).areas(area);
+            Layout::horizontal([Constraint::Percentage(45), Constraint::Percentage(55)])
+                .areas(area);
 
         let module = &self.modules[self.tab];
         let rows = module.rows();
         let sel = self.selected[self.tab].min(rows.len().saturating_sub(1));
 
+        // headings are extra, unselectable lines between the rows
         let mut items: Vec<ListItem> = Vec::new();
         let mut list_sel: Option<usize> = None;
         let mut last = String::new();
@@ -3938,7 +4217,9 @@ impl App {
             if !row.group.is_empty() && row.group != last {
                 items.push(ListItem::new(Line::from(Span::styled(
                     format!("── {} ──", row.group),
-                    Style::new().fg(Color::DarkGray).add_modifier(Modifier::BOLD),
+                    Style::new()
+                        .fg(Color::DarkGray)
+                        .add_modifier(Modifier::BOLD),
                 ))));
                 last = row.group.clone();
             }
@@ -3966,6 +4247,9 @@ impl App {
         );
     }
 
+    // A thick 24-hour strip like a sleep tracker. It shows the day the tab is
+    // about (today, or the selected day in the calendar): time that has passed
+    // is shaded, what is planned is coloured, and the current moment is marked.
     fn draw_day_bar(&self, f: &mut Frame, area: Rect) {
         let module = &self.modules[self.tab];
         let now = Local::now();
@@ -3974,7 +4258,11 @@ impl App {
         let past = date < today();
 
         let title = if is_today {
-            format!(" {} · now {} ", date.format("%a %d %b"), now.format("%H:%M"))
+            format!(
+                " {} · now {} ",
+                date.format("%a %d %b"),
+                now.format("%H:%M")
+            )
         } else {
             format!(" {} ", date.format("%A %d %B"))
         };
@@ -3982,13 +4270,14 @@ impl App {
         let inner = block.inner(area);
         f.render_widget(block, area);
         if inner.width < 12 || inner.height < 5 {
-            return;
+            return; // terminal too small to draw it
         }
 
         let width = inner.width as usize;
         let minutes = (now.hour() * 60 + now.minute()) as usize;
         let now_col = (minutes * width / (24 * 60)).min(width - 1);
 
+        // what is planned on that day: every tab can report blocks, in its own colour
         let mut paint: Vec<Option<Color>> = vec![None; width];
         for m in &self.modules {
             let color = m.block_color();
@@ -4001,19 +4290,27 @@ impl App {
             }
         }
 
+        // row 0: a marker above the current time (only when looking at today)
         let marker = if is_today {
             Line::from(vec![
                 Span::raw(" ".repeat(now_col)),
-                Span::styled("▼", Style::new().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
+                Span::styled(
+                    "▼",
+                    Style::new().fg(Color::Yellow).add_modifier(Modifier::BOLD),
+                ),
             ])
         } else {
             Line::from("")
         };
 
+        // rows 1-2: the bar itself, two rows thick
         let spans: Vec<Span> = (0..width)
             .map(|col| {
                 if is_today && col == now_col {
-                    Span::styled("█", Style::new().fg(Color::Yellow).add_modifier(Modifier::BOLD))
+                    Span::styled(
+                        "█",
+                        Style::new().fg(Color::Yellow).add_modifier(Modifier::BOLD),
+                    )
                 } else if let Some(color) = paint[col] {
                     Span::styled("█", Style::new().fg(color))
                 } else if past || (is_today && col < now_col) {
@@ -4025,6 +4322,7 @@ impl App {
             .collect();
         let bar = Line::from(spans);
 
+        // row 3: hour labels (every 3 hours, or every 6 when the terminal is narrow)
         let step = if width >= 32 { 3 } else { 6 };
         let mut labels = vec![' '; width];
         for h in (0..=24usize).step_by(step) {
@@ -4035,6 +4333,7 @@ impl App {
         }
         let labels: String = labels.into_iter().collect();
 
+        // row 4: what the colours mean
         let key = |color: Color, text: &'static str| {
             vec![Span::styled("■ ", Style::new().fg(color)), Span::raw(text)]
         };
@@ -4045,10 +4344,17 @@ impl App {
         legend.push(Span::styled("▒ ", Style::new().fg(Color::Blue)));
         legend.push(Span::raw("passed"));
 
-        let lines = vec![marker, bar.clone(), bar, Line::from(labels), Line::from(legend)];
+        let lines = vec![
+            marker,
+            bar.clone(),
+            bar,
+            Line::from(labels),
+            Line::from(legend),
+        ];
         f.render_widget(Paragraph::new(lines), inner);
     }
 
+    // The search tab's result list. The query itself is in the bottom bar.
     fn draw_search(&self, f: &mut Frame, area: Rect) {
         let hits = &self.search_hits;
         let items: Vec<ListItem> = hits
@@ -4066,15 +4372,19 @@ impl App {
             .block(Block::bordered().title(" results · try #tag to search tags "))
             .highlight_style(Style::new().add_modifier(Modifier::REVERSED))
             .highlight_symbol("> ");
-        let mut state = ListState::default()
-            .with_selected(if hits.is_empty() { None } else { Some(self.search_sel) });
+        let mut state = ListState::default().with_selected(if hits.is_empty() {
+            None
+        } else {
+            Some(self.search_sel)
+        });
         f.render_stateful_widget(list, area, &mut state);
     }
 }
 
+// Start-up: build the app, take over the terminal, run, and always give the terminal back.
 fn main() {
     let mut app = App::new();
-    let mut terminal = ratatui::init();
+    let mut terminal = ratatui::init(); // also installs a panic hook that restores the terminal
     let result = app.run(&mut terminal);
     ratatui::restore();
     if let Err(e) = result {
@@ -4083,7 +4393,7 @@ fn main() {
 }
 
 // ===========================================================================
-// TESTS
+// TESTS: the pure logic. Run with `cargo test`.
 // ===========================================================================
 
 #[cfg(test)]
@@ -4097,6 +4407,7 @@ mod tests {
     #[test]
     fn spans_cross_midnight() {
         let from = d("2026-10-24");
+        // sleep 23:00 for 7 hours
         assert_eq!(span_on(from, 23 * 60, 420, from), Some((1380, 1440)));
         assert_eq!(span_on(from, 23 * 60, 420, d("2026-10-25")), Some((0, 360)));
         assert_eq!(span_on(from, 23 * 60, 420, d("2026-10-26")), None);
@@ -4133,10 +4444,14 @@ mod tests {
         assert_eq!(title, "Buy milk");
         assert_eq!(tags, vec!["errands".to_string()]);
         assert_eq!(group, Some("quick".to_string()));
+        // where groups aren't wanted, @words stay in the title
         let (title, _, group) = split_text("mail me@x.com @home", false);
         assert_eq!(title, "mail me@x.com @home");
         assert_eq!(group, None);
-        assert_eq!(join_text("Buy milk", &tags, Some("quick")), "Buy milk #errands @quick");
+        assert_eq!(
+            join_text("Buy milk", &tags, Some("quick")),
+            "Buy milk #errands @quick"
+        );
     }
 
     #[test]
@@ -4144,7 +4459,7 @@ mod tests {
         assert!(Group::parse("sero") == Some(Group::Serotonin));
         assert!(Group::parse("q") == Some(Group::Quick));
         assert!(Group::parse("main") == Some(Group::Main));
-        assert!(Group::parse("s").is_none());
+        assert!(Group::parse("s").is_none()); // steady, secondary, serotonin
         assert!(Group::parse("nope").is_none());
     }
 
@@ -4163,11 +4478,17 @@ mod tests {
     #[test]
     fn timetable_lines_become_events() {
         let got = parse_timetable("14:00-15:30 Dentist #health").expect("an event");
-        assert_eq!(got, ["Dentist #health", "", "14:00", "15:30"].map(String::from));
+        assert_eq!(
+            got,
+            ["Dentist #health", "", "14:00", "15:30"].map(String::from)
+        );
         let got = parse_timetable("2026-10-30 9:00-10:00 Standup").expect("an event");
-        assert_eq!(got, ["Standup", "2026-10-30", "9:00", "10:00"].map(String::from));
+        assert_eq!(
+            got,
+            ["Standup", "2026-10-30", "9:00", "10:00"].map(String::from)
+        );
         assert!(parse_timetable("lunch with Ali").is_none());
-        assert!(parse_timetable("14:00-15:30").is_none());
+        assert!(parse_timetable("14:00-15:30").is_none()); // no title
         assert!(parse_timetable("25:00-26:00 Nope").is_none());
     }
 
@@ -4178,78 +4499,102 @@ mod tests {
             .map(|s| s.to_string())
             .collect();
         let mut habit = Habit::build(1, &input, None).expect("valid habit");
-        assert_eq!(habit.streak(), 1);
-        assert!(habit.act(0, '+', &[]).is_some());
+        assert_eq!(habit.streak(), 1); // today, nothing smoked yet
+        assert!(habit.act(0, '+', &[]).is_some()); // one slip: over a limit of 0
         assert_eq!(habit.streak(), 0);
         assert!(habit.act(0, '-', &[]).is_some());
         assert_eq!(habit.streak(), 1);
     }
 
+    // ----- RBIP layer 1 -----
+
     #[test]
-    fn intents_from_diary_lines() {
-        use Intent::*;
-        assert_eq!(
-            parse_intents("todo: buy milk @quick"),
-            vec![Todo { title: "buy milk".into(), group: Group::Quick }]
-        );
-        assert_eq!(
-            parse_intents("TODO: write report"),
-            vec![Todo { title: "write report".into(), group: Group::Main }]
-        );
-        assert_eq!(
-            parse_intents("finished laundry"),
-            vec![Done { title: "laundry".into() }]
-        );
-        assert_eq!(
-            parse_intents("smoked 2"),
-            vec![HabitCount { title: "smoked".into(), delta: 2 }]
-        );
-        let ev = parse_intents("14:00-15:30 Dentist #health");
-        assert!(matches!(
-            ev.as_slice(),
-            [Event { title, date, start, end }]
-            if title == "Dentist #health" && date.is_empty() && start == "14:00" && end == "15:30"
-        ));
-        assert!(parse_intents("I read 5 pages").is_empty());
-        assert!(parse_intents("just a thought").is_empty());
+    fn sentences_split_on_marks_but_not_in_numbers() {
+        let s = split_sentences("I went out. I need to return the pen!  add todo buy 2.5 kg rice.");
+        assert_eq!(s.len(), 3);
+        assert_eq!(s[0].text, "I went out");
+        assert_eq!(s[1].end, Some('!'));
+        assert_eq!(s[2].text, "add todo buy 2.5 kg rice");
+        assert_eq!(s[2].end, Some('.'));
+        assert_eq!(split_sentences("no end mark")[0].end, None);
+        assert!(split_sentences("  ...  ").is_empty());
     }
 
     #[test]
-    fn next_id_rule_never_reuses() {
-        // Pure rule: id = max(entries, high-water) + 1.
-        assert_eq!(next_id_from(0, 0), 1);
-        assert_eq!(next_id_from(2, 0), 3);
-        // Deleted newest: file has 2, high-water says 3.
-        assert_eq!(next_id_from(2, 3), 4);
-        // Handed-out id from another writer: high-water ahead of file.
-        assert_eq!(next_id_from(5, 9), 10);
+    fn tense_is_past_or_present() {
+        assert_eq!(tense_of("I went to the shop"), Tense::Past);
+        assert_eq!(tense_of("I walked home"), Tense::Past);
+        assert_eq!(tense_of("I need to return the pen"), Tense::Present); // "need" is not past
+        assert_eq!(tense_of("The speed is high"), Tense::Present);
+        assert_eq!(tense_of("I want to go"), Tense::Present);
     }
 
     #[test]
-    fn chat_msg_round_trips() {
-        let original = ChatMsg {
-            id: 7,
-            you: "how was today?".into(),
-            companion: "quiet, and that's fine.".into(),
-            when: "2026-10-24 22:00".into(),
+    fn add_todo_pattern_finds_the_todo() {
+        let parsed = parse_line("Long day. Add todo go walk. Nothing else");
+        assert_eq!(parsed.len(), 3);
+        assert_eq!(parsed[0].hit, None);
+        assert_eq!(parsed[1].hit, Some((0, "go walk".to_string())));
+        assert_eq!(parsed[1].tense, Tense::Present);
+        assert_eq!(parsed[2].hit, None);
+        // no period, no command; no words after "add todo", no command
+        assert_eq!(parse_line("add todo go walk")[0].hit, None);
+        assert_eq!(parse_line("add todo.")[0].hit, None);
+        // a past-looking word inside the todo doesn't make the command past
+        let p = parse_line("add todo return borrowed book.");
+        assert_eq!(p[0].hit, Some((0, "return borrowed book".to_string())));
+        assert_eq!(p[0].tense, Tense::Present);
+    }
+
+    #[test]
+    fn a_diary_line_becomes_a_question() {
+        let line = DiaryLine::from_line(1, "Long day. add todo go walk.", "2026-11-03 10:00")
+            .expect("a line");
+        let view = View {
+            todos: &[],
+            diary: &[line],
         };
-        let text = serde_json::to_string(&original).unwrap();
-        let back: ChatMsg = serde_json::from_str(&text).unwrap();
-        assert_eq!(back.you, original.you);
-        assert_eq!(back.companion, original.companion);
+        let ideas = Intent.advise(&view, Local::now().naive_local());
+        assert_eq!(ideas.len(), 1);
+        assert_eq!(ideas[0].ask, "Add todo \"go walk\"?");
+        assert_eq!(ideas[0].input, vec!["go walk".to_string()]);
+        assert_eq!(
+            (ideas[0].module, ideas[0].action, ideas[0].item),
+            ("todo", 'a', None)
+        );
+    }
+
+    // The whole road: diary line -> the AI asks -> you say yes -> the todo exists. Uses its own
+    // data folder, so the real one is never touched.
+    #[test]
+    #[allow(unused_unsafe)]
+    fn diary_line_to_todo_through_the_ai_tab() {
+        let dir = std::env::temp_dir().join(format!("lifeos_test_{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        unsafe { std::env::set_var("DORTYUZLU_DIR", &dir) };
+
+        let todos: Shared<Todo> = share();
+        let diary: Shared<DiaryLine> = share();
+        let mut todo_tab = ListModule::new("todo", 0, &todos);
+        let mut diary_tab = ListModule::new("diary", 0, &diary);
+        let mut ai = AiModule::new(&todos, &diary);
+        let mut log = Logger::open();
+
+        diary_tab.line_input("Long day. add todo go walk.", "", &mut log);
+        assert_eq!(ai.think(), 1);
+        assert!(
+            todos.borrow().items.is_empty(),
+            "nothing may happen before the answer"
+        );
+        assert_eq!(ai.think(), 0, "the same sentence is never asked twice");
+
+        let id = ai.rows()[0].id;
+        ai.apply('y', Some(id), &[], &mut log);
+        for request in ai.outbox() {
+            todo_tab.apply(request.key, request.item, &request.input, &mut log);
+        }
+        assert_eq!(todos.borrow().items.len(), 1);
+        assert_eq!(todos.borrow().items[0].header, "go walk");
+        let _ = fs::remove_dir_all(&dir);
     }
 }
-```
-
----
-
-## What you get when you `cargo run`
-
-1. **Diary is the front door.** Type `todo: buy milk @quick` in the diary tab. Two seconds later, the AI tab shows: _"Add 'buy milk' to your quick todos?"_ Press `y`, verify the todo exists. Same for `finished laundry`, `smoked 2`, `14:00-15:30 Dentist`.
-2. **Two AIs** — `Curator` proposes structural fixes and turns intents into proposals. `Companion` (stub today) answers chat. Both are plug points for a real local model. `proposals.json` and `chat.json` are your training data.
-3. **Modules toggle** from the settings tab. Disable `dict`, restart, the tab is gone. Re-enable, restart, the tab and its data are back. Diary, AI, and settings can't be turned off.
-4. **No lost ids.** Delete a todo, add a new one — the new one gets a _higher_ id than any before it. Proposals and log entries always point at the right thing.
-5. **Panel actually works** — `cargo run --bin panel` with the TUI open, type into the browser, and the entry appears in the TUI within 2 s.
-6. **Catch-up** on start — you see how long you were away.
-
-If something doesn't compile on your toolchain (edition/version mismatch on `axum`, `ratatui`, etc.), tell me the exact `cargo check` output and I'll fix that single error. Otherwise this is ready to `cargo run`.

@@ -473,7 +473,11 @@ impl<T: Entry> Store<T> {
                 // never crash on, or overwrite, a file we can't read: keep it aside
                 let aside = data_path(&format!("{}.corrupt", T::FILE));
                 let _ = fs::rename(&path, &aside);
-                eprintln!("{} could not be read; it was kept as {}", path.display(), aside.display());
+                eprintln!(
+                    "{} could not be read; it was kept as {}",
+                    path.display(),
+                    aside.display()
+                );
                 Vec::new()
             }),
             Err(_) => Vec::new(),
@@ -660,7 +664,11 @@ struct Row {
 
 impl Row {
     fn new(id: u64, label: String) -> Row {
-        Row { id, label, group: String::new() }
+        Row {
+            id,
+            label,
+            group: String::new(),
+        }
     }
 }
 
@@ -725,8 +733,13 @@ trait Module {
     // Does the work and returns a status message for the UI.
     // Runs an action once the UI has collected its prompts. `id` is the selected row. Returns the
     // message for the status line.
-    fn apply(&mut self, action: char, id: Option<u64>, input: &[String], log: &mut Logger)
-        -> String;
+    fn apply(
+        &mut self,
+        action: char,
+        id: Option<u64>,
+        input: &[String],
+        log: &mut Logger,
+    ) -> String;
     // The fuzzy finder asks every part.
     fn search(&self, _query: &str) -> Vec<(i32, Row)> {
         Vec::new()
@@ -967,17 +980,37 @@ impl<T: Record> Module for ListModule<T> {
         let keys = T::keys(self.lens);
         let mut list = Vec::new();
         if keys.contains('a') {
-            list.push(Action { key: 'a', label: "add", needs_item: false, prompts: T::prompts() });
+            list.push(Action {
+                key: 'a',
+                label: "add",
+                needs_item: false,
+                prompts: T::prompts(),
+            });
         }
         list.extend(T::extra_actions(self.lens));
         if keys.contains('e') {
-            list.push(Action { key: 'e', label: "edit", needs_item: true, prompts: T::prompts() });
+            list.push(Action {
+                key: 'e',
+                label: "edit",
+                needs_item: true,
+                prompts: T::prompts(),
+            });
         }
         if keys.contains('d') {
-            list.push(Action { key: 'd', label: "delete", needs_item: true, prompts: &[] });
+            list.push(Action {
+                key: 'd',
+                label: "delete",
+                needs_item: true,
+                prompts: &[],
+            });
         }
         if !T::views(self.lens).is_empty() {
-            list.push(Action { key: 'v', label: "view", needs_item: false, prompts: &[] });
+            list.push(Action {
+                key: 'v',
+                label: "view",
+                needs_item: false,
+                prompts: &[],
+            });
         }
         if T::TAGGED {
             list.push(Action {
@@ -992,7 +1025,9 @@ impl<T: Record> Module for ListModule<T> {
 
     fn initial(&self, action: char, id: u64, step: usize) -> String {
         let store = self.store.borrow();
-        let Some(item) = store.get(id) else { return String::new() };
+        let Some(item) = store.get(id) else {
+            return String::new();
+        };
         if action == 'e' {
             item.fields().get(step).cloned().unwrap_or_default()
         } else {
@@ -1002,8 +1037,7 @@ impl<T: Record> Module for ListModule<T> {
 
     // The generic key handler. v and t only change what is shown; a / e / d add, edit, delete; any
     // other key goes to the entry's own `act`. Every change is saved at once and logged.
-    fn apply(&mut self, key: char, id: Option<u64>, input: &[String], log: &mut Logger)
-        -> String {
+    fn apply(&mut self, key: char, id: Option<u64>, input: &[String], log: &mut Logger) -> String {
         let lens = self.lens;
         let keys = T::keys(lens);
 
@@ -1030,7 +1064,9 @@ impl<T: Record> Module for ListModule<T> {
         let mut store = self.store.borrow_mut();
         match key {
             'e' if keys.contains('e') => {
-                let Some(id) = id else { return "Nothing selected.".to_string() };
+                let Some(id) = id else {
+                    return "Nothing selected.".to_string();
+                };
                 let Some(old) = store.get(id).cloned() else {
                     return format!("No such {}.", T::NOUN);
                 };
@@ -1047,7 +1083,9 @@ impl<T: Record> Module for ListModule<T> {
                 format!("Edited {}.", T::NOUN)
             }
             'd' if keys.contains('d') => {
-                let Some(id) = id else { return "Nothing selected.".to_string() };
+                let Some(id) = id else {
+                    return "Nothing selected.".to_string();
+                };
                 let Some(title) = store.get(id).map(|i| i.title().to_string()) else {
                     return format!("No such {}.", T::NOUN);
                 };
@@ -1291,7 +1329,14 @@ fn parse_when(text: &str) -> Result<String, String> {
 
 // The views the `v` key cycles through on each of the three tabs.
 const TODO_VIEWS: &[&str] = &[
-    "focus", "all", "main", "quick", "steady", "resurface", "secondary", "serotonin",
+    "focus",
+    "all",
+    "main",
+    "quick",
+    "steady",
+    "resurface",
+    "secondary",
+    "serotonin",
 ];
 const DONE_VIEWS: &[&str] = &["today", "week", "all"];
 const CUBE_VIEWS: &[&str] = &["all", "placed", "unplaced"];
@@ -1307,7 +1352,11 @@ impl Record for Todo {
     }
 
     fn fields(&self) -> Vec<String> {
-        let group = if self.group == Group::Main { None } else { Some(self.group.word()) };
+        let group = if self.group == Group::Main {
+            None
+        } else {
+            Some(self.group.word())
+        };
         vec![join_text(&self.header, &self.tags, group)]
     }
 
@@ -1320,8 +1369,12 @@ impl Record for Todo {
         }
         // no @group typed means main; the edit box shows @group, so removing it resets it
         let group = match group {
-            Some(word) => Group::parse(&word)
-                .ok_or_else(|| format!("No group @{}. Try quick, steady, resurface, secondary, serotonin.", word))?,
+            Some(word) => Group::parse(&word).ok_or_else(|| {
+                format!(
+                    "No group @{}. Try quick, steady, resurface, secondary, serotonin.",
+                    word
+                )
+            })?,
             None => Group::Main,
         };
         Ok(Todo {
@@ -1397,7 +1450,11 @@ impl Record for Todo {
             self.slot.clone()
         };
         let mut text = format!("{}\n\nstatus: {}\n", self.header, status);
-        text.push_str(&format!("group: {} ({})\n", self.group.word(), self.group.about()));
+        text.push_str(&format!(
+            "group: {} ({})\n",
+            self.group.word(),
+            self.group.about()
+        ));
         if !self.tags.is_empty() {
             text.push_str(&format!("tags: {}\n", tags_text(&self.tags)));
         }
@@ -1432,7 +1489,9 @@ impl Record for Todo {
             (0, "all") | (2, "all") => true,
             (0, word) => self.group.word() == word,
             (1, "today") => self.done_on == today_text(),
-            (1, "week") => parse_date(&self.done_on).map_or(false, |d| (today() - d).num_days() < 7),
+            (1, "week") => {
+                parse_date(&self.done_on).map_or(false, |d| (today() - d).num_days() < 7)
+            }
             (2, "placed") => !self.slot.is_empty(),
             (2, "unplaced") => self.slot.is_empty(),
             _ => true,
@@ -1480,12 +1539,22 @@ impl Record for Todo {
     // Keys besides add / edit / delete: x done or reopen, g change group; on the cubes tab also m
     // size and s place on the timeline.
     fn extra_actions(lens: u8) -> Vec<Action> {
-        let done = |label: &'static str| Action { key: 'x', label, needs_item: true, prompts: &[] };
+        let done = |label: &'static str| Action {
+            key: 'x',
+            label,
+            needs_item: true,
+            prompts: &[],
+        };
         match lens {
             1 => vec![done("reopen")],
             2 => vec![
                 done("done"),
-                Action { key: 'm', label: "size", needs_item: true, prompts: &["Size in minutes (empty = unsized)"] },
+                Action {
+                    key: 'm',
+                    label: "size",
+                    needs_item: true,
+                    prompts: &["Size in minutes (empty = unsized)"],
+                },
                 Action {
                     key: 's',
                     label: "place",
@@ -1520,7 +1589,11 @@ impl Record for Todo {
         match key {
             'x' => {
                 self.is_done = !self.is_done;
-                self.done_on = if self.is_done { today_text() } else { String::new() };
+                self.done_on = if self.is_done {
+                    today_text()
+                } else {
+                    String::new()
+                };
                 Some(Ok(if self.is_done {
                     (Kind::Done, "Moved to done.".to_string())
                 } else {
@@ -1541,14 +1614,20 @@ impl Record for Todo {
                 } else {
                     match text.parse() {
                         Ok(m) => m,
-                        Err(_) => return Some(Err("Size must be whole minutes, like 30.".to_string())),
+                        Err(_) => {
+                            return Some(Err("Size must be whole minutes, like 30.".to_string()))
+                        }
                     }
                 };
                 if minutes > 1440 {
                     return Some(Err("A cube can't be longer than a day (1440).".to_string()));
                 }
                 self.minutes = minutes;
-                let message = if minutes == 0 { "Size cleared." } else { "Cube resized." };
+                let message = if minutes == 0 {
+                    "Size cleared."
+                } else {
+                    "Cube resized."
+                };
                 Some(Ok((Kind::Edited, message.to_string())))
             }
             's' => {
@@ -1576,8 +1655,12 @@ impl Record for Todo {
         if lens != 2 || self.is_done {
             return Vec::new();
         }
-        let Some((from, start)) = self.placed() else { return Vec::new() };
-        span_on(from, start, self.length(), date).into_iter().collect()
+        let Some((from, start)) = self.placed() else {
+            return Vec::new();
+        };
+        span_on(from, start, self.length(), date)
+            .into_iter()
+            .collect()
     }
 
     fn tick(&mut self) -> bool {
@@ -1789,7 +1872,11 @@ impl Record for Habit {
             Some(_) => return Err("Type b to build a habit or q to quit one.".to_string()),
         };
         let target: u32 = if input[2].trim().is_empty() {
-            if kind == HabitKind::Make { 1 } else { 0 }
+            if kind == HabitKind::Make {
+                1
+            } else {
+                0
+            }
         } else {
             input[2]
                 .trim()
@@ -1846,8 +1933,16 @@ impl Record for Habit {
             HabitKind::Quit => format!("quit: at most {}{} a day", self.target, self.unit_text()),
         };
         let mut text = format!("{}\n\n{}\n", self.title, goal);
-        text.push_str(&format!("today: {}{}\n", self.count(today()), self.unit_text()));
-        text.push_str(&format!("streak: {} days (best {})\n", self.streak(), self.best_streak()));
+        text.push_str(&format!(
+            "today: {}{}\n",
+            self.count(today()),
+            self.unit_text()
+        ));
+        text.push_str(&format!(
+            "streak: {} days (best {})\n",
+            self.streak(),
+            self.best_streak()
+        ));
         text.push_str(&format!("last 30 days: {} of {} good\n", good, total));
         text.push_str(&format!("last 14 days: {}\n", self.recent(14)));
         text.push_str(&format!("started: {}\n", self.started));
@@ -1872,8 +1967,18 @@ impl Record for Habit {
 
     fn extra_actions(_lens: u8) -> Vec<Action> {
         vec![
-            Action { key: '+', label: "+1", needs_item: true, prompts: &[] },
-            Action { key: '-', label: "-1", needs_item: true, prompts: &[] },
+            Action {
+                key: '+',
+                label: "+1",
+                needs_item: true,
+                prompts: &[],
+            },
+            Action {
+                key: '-',
+                label: "-1",
+                needs_item: true,
+                prompts: &[],
+            },
         ]
     }
 
@@ -1884,10 +1989,15 @@ impl Record for Habit {
                 *self.counts.entry(today_text()).or_insert(0) += 1;
                 let n = self.count(today());
                 let message = match self.kind {
-                    HabitKind::Make if n >= self.target => format!("{}/{} today. Done!", n, self.target),
+                    HabitKind::Make if n >= self.target => {
+                        format!("{}/{} today. Done!", n, self.target)
+                    }
                     HabitKind::Make => format!("{}/{} today.", n, self.target),
                     HabitKind::Quit if n > self.target => {
-                        format!("{} today, over the limit of {}. Streak reset.", n, self.target)
+                        format!(
+                            "{} today, over the limit of {}. Streak reset.",
+                            n, self.target
+                        )
                     }
                     HabitKind::Quit => format!("{} of {} allowed today.", n, self.target),
                 };
@@ -1943,9 +2053,17 @@ fn parse_days(text: &str) -> Result<Vec<u8>, String> {
         "weekend" | "weekends" => return Ok(WEEKEND.to_vec()),
         _ => {}
     }
-    let bad = || format!("Don't know \"{}\". Try daily, weekdays, mon-fri or mon,wed,fri.", text);
+    let bad = || {
+        format!(
+            "Don't know \"{}\". Try daily, weekdays, mon-fri or mon,wed,fri.",
+            text
+        )
+    };
     let mut days: Vec<u8> = Vec::new();
-    for part in text.split(|c: char| c == ',' || c.is_whitespace()).filter(|p| !p.is_empty()) {
+    for part in text
+        .split(|c: char| c == ',' || c.is_whitespace())
+        .filter(|p| !p.is_empty())
+    {
         if let Some((from, to)) = part.split_once('-') {
             let (Some(from), Some(to)) = (day_index(from), day_index(to)) else {
                 return Err(bad());
@@ -1961,7 +2079,9 @@ fn parse_days(text: &str) -> Result<Vec<u8>, String> {
                 day = (day + 1) % 7; // mon-sun and fri-mon both work
             }
         } else {
-            let Some(day) = day_index(part) else { return Err(bad()) };
+            let Some(day) = day_index(part) else {
+                return Err(bad());
+            };
             if !days.contains(&day) {
                 days.push(day);
             }
@@ -2027,7 +2147,8 @@ impl Entry for Daily {
 impl Daily {
     // Is it planned on that date's weekday?
     fn active_on(&self, day: NaiveDate) -> bool {
-        self.days.contains(&(day.weekday().num_days_from_monday() as u8))
+        self.days
+            .contains(&(day.weekday().num_days_from_monday() as u8))
     }
 }
 
@@ -2107,7 +2228,11 @@ impl Record for Daily {
         } else {
             format!("at {}", self.start)
         };
-        let specs = if self.specs.is_empty() { "(none)" } else { self.specs.as_str() };
+        let specs = if self.specs.is_empty() {
+            "(none)"
+        } else {
+            self.specs.as_str()
+        };
         let mut text = format!(
             "{}\n\nduration: {} min\ndays: {}\nday bar: {}\nspecifications: {}\n",
             self.title,
@@ -2121,7 +2246,11 @@ impl Record for Daily {
         }
         text.push_str(&format!(
             "\ndone today: {}\ndays done in total: {}",
-            if self.done_dates.contains(&today_text()) { "yes" } else { "no" },
+            if self.done_dates.contains(&today_text()) {
+                "yes"
+            } else {
+                "no"
+            },
             self.done_dates.len()
         ));
         text
@@ -2137,13 +2266,22 @@ impl Record for Daily {
 
     fn order(&self, _lens: u8) -> String {
         let rank = if self.active_on(today()) { 0 } else { 1 };
-        let start = if self.start.is_empty() { "99:99" } else { self.start.as_str() };
+        let start = if self.start.is_empty() {
+            "99:99"
+        } else {
+            self.start.as_str()
+        };
         format!("{}{}{:012}", rank, start, self.id)
     }
 
     fn extra_actions(_lens: u8) -> Vec<Action> {
         vec![
-            Action { key: 'x', label: "done today", needs_item: true, prompts: &[] },
+            Action {
+                key: 'x',
+                label: "done today",
+                needs_item: true,
+                prompts: &[],
+            },
             Action {
                 key: 's',
                 label: "day bar",
@@ -2167,7 +2305,10 @@ impl Record for Daily {
         match key {
             'x' => {
                 if !self.active_on(today()) {
-                    return Some(Err(format!("Not planned for today ({}).", days_text(&self.days))));
+                    return Some(Err(format!(
+                        "Not planned for today ({}).",
+                        days_text(&self.days)
+                    )));
                 }
                 let day = today_text();
                 let done = match self.done_dates.iter().position(|d| *d == day) {
@@ -2195,7 +2336,10 @@ impl Record for Daily {
                 match minutes_of(text) {
                     Some(minutes) => {
                         self.start = clock(minutes);
-                        Some(Ok((Kind::Edited, format!("On the day bar at {}.", self.start))))
+                        Some(Ok((
+                            Kind::Edited,
+                            format!("On the day bar at {}.", self.start),
+                        )))
                     }
                     None => Some(Err("Start must look like 19:00.".to_string())),
                 }
@@ -2207,7 +2351,9 @@ impl Record for Daily {
     // On every day it is planned for, from its start time for its duration.
     // Yesterday is checked too, so sleep from 23:00 shows up after midnight.
     fn blocks(&self, _lens: u8, date: NaiveDate) -> Vec<(u32, u32)> {
-        let Some(start) = minutes_of(&self.start) else { return Vec::new() };
+        let Some(start) = minutes_of(&self.start) else {
+            return Vec::new();
+        };
         [date.pred_opt(), Some(date)]
             .into_iter()
             .flatten()
@@ -2263,7 +2409,12 @@ impl Record for Page {
         if title.is_empty() {
             return Err("Title can't be empty.".to_string());
         }
-        Ok(Page { id, title, text: input[1].clone(), tags })
+        Ok(Page {
+            id,
+            title,
+            text: input[1].clone(),
+            tags,
+        })
     }
 
     fn label(&self, _lens: u8) -> String {
@@ -2564,7 +2715,10 @@ struct CalendarModule {
 
 impl CalendarModule {
     fn new(events: &Shared<CalEvent>) -> Self {
-        CalendarModule { events: Rc::clone(events), month_offset: 0 }
+        CalendarModule {
+            events: Rc::clone(events),
+            month_offset: 0,
+        }
     }
 
     // First day of the month being shown (moved by month_offset).
@@ -2618,11 +2772,7 @@ impl Module for CalendarModule {
 
     fn day_blocks(&self, date: NaiveDate) -> Vec<(u32, u32)> {
         let store = self.events.borrow();
-        let blocks: Vec<(u32, u32)> = store
-            .items
-            .iter()
-            .flat_map(|e| e.blocks(0, date))
-            .collect();
+        let blocks: Vec<(u32, u32)> = store.items.iter().flat_map(|e| e.blocks(0, date)).collect();
         blocks
     }
 
@@ -2652,7 +2802,9 @@ impl Module for CalendarModule {
     // the month as a small grid, then the events of the selected day
     fn detail(&self, id: u64) -> String {
         let first = self.first_of_month();
-        let Some(date) = first.with_day(id as u32) else { return String::new() };
+        let Some(date) = first.with_day(id as u32) else {
+            return String::new();
+        };
         let now = today();
 
         let mut out = format!("{}\n\n", first.format("%B %Y"));
@@ -2687,7 +2839,11 @@ impl Module for CalendarModule {
             out.push_str("(nothing planned)\n");
         }
         for e in events {
-            let note = if e.first_day() != date { "  (from the evening before)" } else { "" };
+            let note = if e.first_day() != date {
+                "  (from the evening before)"
+            } else {
+                ""
+            };
             out.push_str(&format!("{}-{}  {}{}\n", e.start, e.end, e.title, note));
         }
         out
@@ -2699,16 +2855,40 @@ impl Module for CalendarModule {
                 key: 'a',
                 label: "add event",
                 needs_item: true, // adds to the selected day
-                prompts: &["Event  (#tag)", "Start (HH:MM)", "End (HH:MM; earlier = next day)"],
+                prompts: &[
+                    "Event  (#tag)",
+                    "Start (HH:MM)",
+                    "End (HH:MM; earlier = next day)",
+                ],
             },
-            Action { key: 'n', label: "next month", needs_item: false, prompts: &[] },
-            Action { key: 'p', label: "prev month", needs_item: false, prompts: &[] },
-            Action { key: 't', label: "this month", needs_item: false, prompts: &[] },
+            Action {
+                key: 'n',
+                label: "next month",
+                needs_item: false,
+                prompts: &[],
+            },
+            Action {
+                key: 'p',
+                label: "prev month",
+                needs_item: false,
+                prompts: &[],
+            },
+            Action {
+                key: 't',
+                label: "this month",
+                needs_item: false,
+                prompts: &[],
+            },
         ]
     }
 
-    fn apply(&mut self, action: char, id: Option<u64>, input: &[String], log: &mut Logger)
-        -> String {
+    fn apply(
+        &mut self,
+        action: char,
+        id: Option<u64>,
+        input: &[String],
+        log: &mut Logger,
+    ) -> String {
         match action {
             'n' | 'p' | 't' => {
                 match action {
@@ -2719,7 +2899,9 @@ impl Module for CalendarModule {
                 format!("Showing {}.", self.first_of_month().format("%B %Y"))
             }
             'a' => {
-                let Some(day) = id else { return "Nothing selected.".to_string() };
+                let Some(day) = id else {
+                    return "Nothing selected.".to_string();
+                };
                 let Some(date) = self.first_of_month().with_day(day as u32) else {
                     return "No such day.".to_string();
                 };
@@ -2833,7 +3015,10 @@ impl Advisor for Rules {
                     ideas.push(Idea {
                         key: format!("cube-ended:{}:{}", todo.id, todo.slot),
                         ask: format!("Mark \"{}\" as done?", todo.header),
-                        why: format!("It was on the timeline at {} and that time is over.", todo.slot),
+                        why: format!(
+                            "It was on the timeline at {} and that time is over.",
+                            todo.slot
+                        ),
                         module: "todo",
                         action: 'x',
                         item: Some(todo.id),
@@ -2903,7 +3088,8 @@ const PAST_WORDS: &[&str] = &[
 // the few common words that only look past.
 const PAST_ENDING: &str = "ed";
 const PAST_MIN_LETTERS: usize = 5;
-const LOOKS_PAST_BUT_ISNT: &[&str] = &["speed", "indeed", "hundred", "proceed", "succeed", "exceed"];
+const LOOKS_PAST_BUT_ISNT: &[&str] =
+    &["speed", "indeed", "hundred", "proceed", "succeed", "exceed"];
 
 // A pattern the parser knows. The only one so far makes a todo.
 struct Pattern {
@@ -2932,7 +3118,10 @@ struct Sentence {
 fn push_sentence(out: &mut Vec<Sentence>, raw: &str, end: Option<char>) {
     let words: Vec<&str> = raw.split_whitespace().collect();
     if !words.is_empty() {
-        out.push(Sentence { text: words.join(" "), end });
+        out.push(Sentence {
+            text: words.join(" "),
+            end,
+        });
     }
 }
 
@@ -2969,7 +3158,10 @@ fn is_past_word(word: &str) -> bool {
 fn tense_of(text: &str) -> Tense {
     let past = text
         .split_whitespace()
-        .map(|w| w.trim_matches(|c: char| !c.is_alphanumeric()).to_lowercase())
+        .map(|w| {
+            w.trim_matches(|c: char| !c.is_alphanumeric())
+                .to_lowercase()
+        })
         .any(|w| is_past_word(&w));
     if past {
         Tense::Past
@@ -3028,7 +3220,11 @@ fn parse_line(text: &str) -> Vec<Parsed> {
                 Some((i, _)) => tense_of(split_template(LIBRARY[*i].template).map_or("", |t| t.0)),
                 None => tense_of(&sentence.text),
             };
-            Parsed { sentence, tense, hit }
+            Parsed {
+                sentence,
+                tense,
+                hit,
+            }
         })
         .collect()
 }
@@ -3044,7 +3240,9 @@ impl Advisor for Intent {
         let mut ideas = Vec::new();
         for line in view.diary {
             for (n, parsed) in parse_line(&line.text).into_iter().enumerate() {
-                let Some((which, slot)) = parsed.hit else { continue };
+                let Some((which, slot)) = parsed.hit else {
+                    continue;
+                };
                 let pattern = &LIBRARY[which];
                 ideas.push(Idea {
                     key: format!("diary:{}:{}:{}", line.id, line.date, n),
@@ -3096,7 +3294,10 @@ impl AiModule {
         {
             let todos = self.todos.borrow();
             let diary = self.diary.borrow();
-            let view = View { todos: &todos.items, diary: &diary.items };
+            let view = View {
+                todos: &todos.items,
+                diary: &diary.items,
+            };
             for advisor in &self.advisors {
                 ideas.extend(advisor.advise(&view, now));
             }
@@ -3135,7 +3336,12 @@ impl Module for AiModule {
     }
 
     fn heading(&self) -> String {
-        let waiting = self.store.items.iter().filter(|p| p.status == Verdict::Pending).count();
+        let waiting = self
+            .store
+            .items
+            .iter()
+            .filter(|p| p.status == Verdict::Pending)
+            .count();
         format!("ai · {} waiting for you", waiting)
     }
 
@@ -3171,7 +3377,9 @@ impl Module for AiModule {
     }
 
     fn detail(&self, id: u64) -> String {
-        let Some(p) = self.store.get(id) else { return String::new() };
+        let Some(p) = self.store.get(id) else {
+            return String::new();
+        };
         let status = match p.status {
             Verdict::Pending => "waiting for your answer".to_string(),
             Verdict::Yes => format!("you said yes ({})", p.decided),
@@ -3197,9 +3405,24 @@ impl Module for AiModule {
 
     fn actions(&self) -> Vec<Action> {
         vec![
-            Action { key: 'y', label: "yes", needs_item: true, prompts: &[] },
-            Action { key: 'n', label: "no", needs_item: true, prompts: &[] },
-            Action { key: 'r', label: "think now", needs_item: false, prompts: &[] },
+            Action {
+                key: 'y',
+                label: "yes",
+                needs_item: true,
+                prompts: &[],
+            },
+            Action {
+                key: 'n',
+                label: "no",
+                needs_item: true,
+                prompts: &[],
+            },
+            Action {
+                key: 'r',
+                label: "think now",
+                needs_item: false,
+                prompts: &[],
+            },
         ]
     }
 
@@ -3216,7 +3439,9 @@ impl Module for AiModule {
                 }
             }
             'y' | 'n' => {
-                let Some(id) = id else { return "Nothing selected.".to_string() };
+                let Some(id) = id else {
+                    return "Nothing selected.".to_string();
+                };
                 let (module, action, item, input, title) = {
                     let Some(p) = self.store.get_mut(id) else {
                         return "No such question.".to_string();
@@ -3224,13 +3449,28 @@ impl Module for AiModule {
                     if p.status != Verdict::Pending {
                         return "Already answered.".to_string();
                     }
-                    p.status = if key == 'y' { Verdict::Yes } else { Verdict::No };
+                    p.status = if key == 'y' {
+                        Verdict::Yes
+                    } else {
+                        Verdict::No
+                    };
                     p.decided = Local::now().format("%Y-%m-%d %H:%M").to_string();
-                    (p.module.clone(), p.action, p.item, p.input.clone(), p.ask.clone())
+                    (
+                        p.module.clone(),
+                        p.action,
+                        p.item,
+                        p.input.clone(),
+                        p.ask.clone(),
+                    )
                 };
                 self.store.save();
                 if key == 'y' {
-                    self.out.push(Request { module, key: action, item, input });
+                    self.out.push(Request {
+                        module,
+                        key: action,
+                        item,
+                        input,
+                    });
                     log.log("ai", Kind::Approved, id, &title);
                     format!("Yes: {}", title)
                 } else {
@@ -3306,7 +3546,9 @@ struct InboxLine {
 
 // Lines that couldn't be added are kept, with the reason, instead of being lost.
 fn keep_rejected(entry: &InboxLine) {
-    let Ok(line) = serde_json::to_string(entry) else { return };
+    let Ok(line) = serde_json::to_string(entry) else {
+        return;
+    };
     if let Ok(mut file) = fs::OpenOptions::new()
         .create(true)
         .append(true)
@@ -3407,8 +3649,7 @@ impl App {
                 if key.kind != KeyEventKind::Press {
                     continue;
                 }
-                if key.modifiers.contains(KeyModifiers::CONTROL) && key.code == KeyCode::Char('c')
-                {
+                if key.modifiers.contains(KeyModifiers::CONTROL) && key.code == KeyCode::Char('c') {
                     break;
                 }
                 self.on_key(key.code);
@@ -3434,7 +3675,9 @@ impl App {
                 return;
             }
         }
-        let Ok(text) = fs::read_to_string(&working) else { return };
+        let Ok(text) = fs::read_to_string(&working) else {
+            return;
+        };
 
         let (mut added, mut failed) = (0, 0);
         for line in text.lines().filter(|l| !l.trim().is_empty()) {
@@ -3561,7 +3804,9 @@ impl App {
 
     // Keeps the selected row inside the list after rows were added or removed.
     fn clamp_selection(&mut self) {
-        let Some(module) = self.modules.get(self.tab) else { return };
+        let Some(module) = self.modules.get(self.tab) else {
+            return;
+        };
         let len = module.rows().len();
         let sel = &mut self.selected[self.tab];
         if len == 0 {
@@ -3587,7 +3832,12 @@ impl App {
         let mut hits = Vec::new();
         for (mi, module) in self.modules.iter().enumerate() {
             for (score, row) in module.search(query) {
-                hits.push(SearchHit { score, module: mi, id: row.id, label: row.label });
+                hits.push(SearchHit {
+                    score,
+                    module: mi,
+                    id: row.id,
+                    label: row.label,
+                });
             }
         }
         hits.sort_by(|a, b| b.score.cmp(&a.score));
@@ -3614,9 +3864,14 @@ impl App {
         let mode = std::mem::replace(&mut self.mode, Mode::Normal);
         match mode {
             Mode::Normal => self.key_normal(code),
-            Mode::Input { module, action, item, step, answers, buffer } => {
-                self.key_input(code, module, action, item, step, answers, buffer)
-            }
+            Mode::Input {
+                module,
+                action,
+                item,
+                step,
+                answers,
+                buffer,
+            } => self.key_input(code, module, action, item, step, answers, buffer),
         }
     }
 
@@ -3657,7 +3912,10 @@ impl App {
             }
             KeyCode::Char('/') => self.go_to_tab(self.modules.len()),
             KeyCode::Char(c) => {
-                let action = self.modules[self.tab].actions().into_iter().find(|a| a.key == c);
+                let action = self.modules[self.tab]
+                    .actions()
+                    .into_iter()
+                    .find(|a| a.key == c);
                 if let Some(action) = action {
                     self.start_action(action);
                 }
@@ -3716,7 +3974,13 @@ impl App {
 
     // All prompts answered: run the action, then run any requests it caused, then fix the
     // selection.
-    fn finish_action(&mut self, module: usize, action: Action, item: Option<u64>, answers: &[String]) {
+    fn finish_action(
+        &mut self,
+        module: usize,
+        action: Action,
+        item: Option<u64>,
+        answers: &[String],
+    ) {
         self.status = self.modules[module].apply(action.key, item, answers, &mut self.log);
         self.flush();
         self.clamp_selection();
@@ -3754,12 +4018,26 @@ impl App {
                     Some(id) => self.modules[module].initial(action.key, id, step),
                     None => String::new(),
                 };
-                self.mode = Mode::Input { module, action, item, step, answers, buffer };
+                self.mode = Mode::Input {
+                    module,
+                    action,
+                    item,
+                    step,
+                    answers,
+                    buffer,
+                };
                 return;
             }
             _ => {}
         }
-        self.mode = Mode::Input { module, action, item, step, answers, buffer };
+        self.mode = Mode::Input {
+            module,
+            action,
+            item,
+            step,
+            answers,
+            buffer,
+        };
     }
 
     // The search tab: typing goes straight into the query box, so letters
@@ -3805,7 +4083,10 @@ impl App {
 
     fn draw(&self, f: &mut Frame) {
         // the day bar sits just above the key bar, only on tabs that ask for it
-        let show_bar = self.modules.get(self.tab).map_or(false, |m| m.shows_day_bar());
+        let show_bar = self
+            .modules
+            .get(self.tab)
+            .map_or(false, |m| m.shows_day_bar());
         let bar_height = if show_bar { 7 } else { 0 };
         let [top, body, daybar, bottom] = Layout::vertical([
             Constraint::Length(3),
@@ -3837,7 +4118,12 @@ impl App {
         // bottom line: prompt, search box or key hints
         let room = (bottom.width as usize).saturating_sub(6);
         let (title, line) = match &self.mode {
-            Mode::Input { action, step, buffer, .. } => {
+            Mode::Input {
+                action,
+                step,
+                buffer,
+                ..
+            } => {
                 let prompt = action.prompts[*step];
                 let space = room.saturating_sub(prompt.chars().count() + 2);
                 (
@@ -3870,7 +4156,10 @@ impl App {
                 }
             },
         };
-        f.render_widget(Paragraph::new(line).block(Block::bordered().title(title)), bottom);
+        f.render_widget(
+            Paragraph::new(line).block(Block::bordered().title(title)),
+            bottom,
+        );
     }
 
     // The diary: history above, the line being written below, newest at the bottom.
@@ -3887,7 +4176,9 @@ impl App {
             if !row.group.is_empty() && row.group != last {
                 items.push(ListItem::new(Line::from(Span::styled(
                     format!("── {} ──", row.group),
-                    Style::new().fg(Color::DarkGray).add_modifier(Modifier::BOLD),
+                    Style::new()
+                        .fg(Color::DarkGray)
+                        .add_modifier(Modifier::BOLD),
                 ))));
                 last = row.group.clone();
             }
@@ -3895,11 +4186,15 @@ impl App {
         }
         let skip = items.len().saturating_sub(room); // headings can push lines out of room
         let items: Vec<ListItem> = items.into_iter().skip(skip).collect();
-        f.render_widget(List::new(items).block(Block::bordered().title(" diary ")), history);
+        f.render_widget(
+            List::new(items).block(Block::bordered().title(" diary ")),
+            history,
+        );
 
         let space = (input_area.width as usize).saturating_sub(4);
         let input = Paragraph::new(format!("{}█", tail(&self.line_buffer, space))).block(
-            Block::bordered().title(" write your story · Enter saves this line · #word makes a tag "),
+            Block::bordered()
+                .title(" write your story · Enter saves this line · #word makes a tag "),
         );
         f.render_widget(input, input_area);
     }
@@ -3907,7 +4202,8 @@ impl App {
     // A normal tab: the list (with headings) on the left, the selected row's details on the right.
     fn draw_module(&self, f: &mut Frame, area: Rect) {
         let [left, right] =
-            Layout::horizontal([Constraint::Percentage(45), Constraint::Percentage(55)]).areas(area);
+            Layout::horizontal([Constraint::Percentage(45), Constraint::Percentage(55)])
+                .areas(area);
 
         let module = &self.modules[self.tab];
         let rows = module.rows();
@@ -3921,7 +4217,9 @@ impl App {
             if !row.group.is_empty() && row.group != last {
                 items.push(ListItem::new(Line::from(Span::styled(
                     format!("── {} ──", row.group),
-                    Style::new().fg(Color::DarkGray).add_modifier(Modifier::BOLD),
+                    Style::new()
+                        .fg(Color::DarkGray)
+                        .add_modifier(Modifier::BOLD),
                 ))));
                 last = row.group.clone();
             }
@@ -3960,7 +4258,11 @@ impl App {
         let past = date < today();
 
         let title = if is_today {
-            format!(" {} · now {} ", date.format("%a %d %b"), now.format("%H:%M"))
+            format!(
+                " {} · now {} ",
+                date.format("%a %d %b"),
+                now.format("%H:%M")
+            )
         } else {
             format!(" {} ", date.format("%A %d %B"))
         };
@@ -3992,7 +4294,10 @@ impl App {
         let marker = if is_today {
             Line::from(vec![
                 Span::raw(" ".repeat(now_col)),
-                Span::styled("▼", Style::new().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
+                Span::styled(
+                    "▼",
+                    Style::new().fg(Color::Yellow).add_modifier(Modifier::BOLD),
+                ),
             ])
         } else {
             Line::from("")
@@ -4002,7 +4307,10 @@ impl App {
         let spans: Vec<Span> = (0..width)
             .map(|col| {
                 if is_today && col == now_col {
-                    Span::styled("█", Style::new().fg(Color::Yellow).add_modifier(Modifier::BOLD))
+                    Span::styled(
+                        "█",
+                        Style::new().fg(Color::Yellow).add_modifier(Modifier::BOLD),
+                    )
                 } else if let Some(color) = paint[col] {
                     Span::styled("█", Style::new().fg(color))
                 } else if past || (is_today && col < now_col) {
@@ -4036,7 +4344,13 @@ impl App {
         legend.push(Span::styled("▒ ", Style::new().fg(Color::Blue)));
         legend.push(Span::raw("passed"));
 
-        let lines = vec![marker, bar.clone(), bar, Line::from(labels), Line::from(legend)];
+        let lines = vec![
+            marker,
+            bar.clone(),
+            bar,
+            Line::from(labels),
+            Line::from(legend),
+        ];
         f.render_widget(Paragraph::new(lines), inner);
     }
 
@@ -4058,8 +4372,11 @@ impl App {
             .block(Block::bordered().title(" results · try #tag to search tags "))
             .highlight_style(Style::new().add_modifier(Modifier::REVERSED))
             .highlight_symbol("> ");
-        let mut state =
-            ListState::default().with_selected(if hits.is_empty() { None } else { Some(self.search_sel) });
+        let mut state = ListState::default().with_selected(if hits.is_empty() {
+            None
+        } else {
+            Some(self.search_sel)
+        });
         f.render_stateful_widget(list, area, &mut state);
     }
 }
@@ -4131,7 +4448,10 @@ mod tests {
         let (title, _, group) = split_text("mail me@x.com @home", false);
         assert_eq!(title, "mail me@x.com @home");
         assert_eq!(group, None);
-        assert_eq!(join_text("Buy milk", &tags, Some("quick")), "Buy milk #errands @quick");
+        assert_eq!(
+            join_text("Buy milk", &tags, Some("quick")),
+            "Buy milk #errands @quick"
+        );
     }
 
     #[test]
@@ -4158,9 +4478,15 @@ mod tests {
     #[test]
     fn timetable_lines_become_events() {
         let got = parse_timetable("14:00-15:30 Dentist #health").expect("an event");
-        assert_eq!(got, ["Dentist #health", "", "14:00", "15:30"].map(String::from));
+        assert_eq!(
+            got,
+            ["Dentist #health", "", "14:00", "15:30"].map(String::from)
+        );
         let got = parse_timetable("2026-10-30 9:00-10:00 Standup").expect("an event");
-        assert_eq!(got, ["Standup", "2026-10-30", "9:00", "10:00"].map(String::from));
+        assert_eq!(
+            got,
+            ["Standup", "2026-10-30", "9:00", "10:00"].map(String::from)
+        );
         assert!(parse_timetable("lunch with Ali").is_none());
         assert!(parse_timetable("14:00-15:30").is_none()); // no title
         assert!(parse_timetable("25:00-26:00 Nope").is_none());
@@ -4224,12 +4550,18 @@ mod tests {
     fn a_diary_line_becomes_a_question() {
         let line = DiaryLine::from_line(1, "Long day. add todo go walk.", "2026-11-03 10:00")
             .expect("a line");
-        let view = View { todos: &[], diary: &[line] };
+        let view = View {
+            todos: &[],
+            diary: &[line],
+        };
         let ideas = Intent.advise(&view, Local::now().naive_local());
         assert_eq!(ideas.len(), 1);
         assert_eq!(ideas[0].ask, "Add todo \"go walk\"?");
         assert_eq!(ideas[0].input, vec!["go walk".to_string()]);
-        assert_eq!((ideas[0].module, ideas[0].action, ideas[0].item), ("todo", 'a', None));
+        assert_eq!(
+            (ideas[0].module, ideas[0].action, ideas[0].item),
+            ("todo", 'a', None)
+        );
     }
 
     // The whole road: diary line -> the AI asks -> you say yes -> the todo exists. Uses its own
@@ -4250,7 +4582,10 @@ mod tests {
 
         diary_tab.line_input("Long day. add todo go walk.", "", &mut log);
         assert_eq!(ai.think(), 1);
-        assert!(todos.borrow().items.is_empty(), "nothing may happen before the answer");
+        assert!(
+            todos.borrow().items.is_empty(),
+            "nothing may happen before the answer"
+        );
         assert_eq!(ai.think(), 0, "the same sentence is never asked twice");
 
         let id = ai.rows()[0].id;

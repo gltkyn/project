@@ -24,7 +24,9 @@ pub fn spawn_background(addr: String) -> Result<(), String> {
         .name("panel".into())
         .spawn(move || {
             let rt = tokio::runtime::Builder::new_multi_thread()
-                .worker_threads(2).enable_all().build()
+                .worker_threads(2)
+                .enable_all()
+                .build()
                 .expect("tokio");
             rt.block_on(async move {
                 match tokio::net::TcpListener::bind(&addr).await {
@@ -45,7 +47,10 @@ pub fn spawn_background(addr: String) -> Result<(), String> {
 pub fn run_foreground(addr: String) -> ExitCode {
     let rt = match tokio::runtime::Runtime::new() {
         Ok(rt) => rt,
-        Err(e) => { eprintln!("tokio: {}", e); return ExitCode::FAILURE; }
+        Err(e) => {
+            eprintln!("tokio: {}", e);
+            return ExitCode::FAILURE;
+        }
     };
     let result = rt.block_on(async move {
         let l = tokio::net::TcpListener::bind(&addr).await?;
@@ -54,7 +59,10 @@ pub fn run_foreground(addr: String) -> ExitCode {
     });
     match result {
         Ok(()) => ExitCode::SUCCESS,
-        Err(e) => { eprintln!("panel: {}", e); ExitCode::FAILURE }
+        Err(e) => {
+            eprintln!("panel: {}", e);
+            ExitCode::FAILURE
+        }
     }
 }
 
@@ -67,38 +75,58 @@ fn router() -> Router {
         .route("/health", get(health))
 }
 
-async fn index() -> Html<&'static str> { Html(PAGE) }
-async fn style() -> impl IntoResponse { ([(header::CONTENT_TYPE, "text/css")], CSS) }
-async fn script() -> impl IntoResponse { ([(header::CONTENT_TYPE, "text/javascript")], JS) }
-async fn health() -> &'static str { "ok\n" }
+async fn index() -> Html<&'static str> {
+    Html(PAGE)
+}
+async fn style() -> impl IntoResponse {
+    ([(header::CONTENT_TYPE, "text/css")], CSS)
+}
+async fn script() -> impl IntoResponse {
+    ([(header::CONTENT_TYPE, "text/javascript")], JS)
+}
+async fn health() -> &'static str {
+    "ok\n"
+}
 
 #[derive(Deserialize)]
 struct AddBody {
-    #[serde(default = "def_diary")] module: String,
+    #[serde(default = "def_diary")]
+    module: String,
     text: String,
 }
 
-fn def_diary() -> String { "diary".into() }
+fn def_diary() -> String {
+    "diary".into()
+}
 
 async fn add_entry(body: Bytes) -> StatusCode {
     let raw = String::from_utf8_lossy(&body).trim().to_string();
-    if raw.is_empty() { return StatusCode::BAD_REQUEST; }
+    if raw.is_empty() {
+        return StatusCode::BAD_REQUEST;
+    }
     let (module, text) = if let Ok(j) = serde_json::from_str::<AddBody>(&raw) {
         (j.module, j.text)
     } else {
         ("diary".to_string(), raw)
     };
     let entry = InboxLine {
-        module, text,
+        module,
+        text,
         at: Local::now().format("%Y-%m-%d %H:%M").to_string(),
     };
     let path = data_path("inbox.jsonl");
     match (|| -> std::io::Result<()> {
-        let mut f = std::fs::OpenOptions::new().create(true).append(true).open(&path)?;
+        let mut f = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&path)?;
         writeln!(f, "{}", serde_json::to_string(&entry).unwrap())?;
         Ok(())
     })() {
         Ok(()) => StatusCode::OK,
-        Err(e) => { eprintln!("inbox: {}", e); StatusCode::INTERNAL_SERVER_ERROR }
+        Err(e) => {
+            eprintln!("inbox: {}", e);
+            StatusCode::INTERNAL_SERVER_ERROR
+        }
     }
 }
