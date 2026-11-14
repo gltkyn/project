@@ -1,33 +1,17 @@
-//! A modular, interconnected life-management system.
+//! project.
 //!
-//! One binary. TUI + panel. Two local AIs, both ask-first.
-//!   Curator    reads todos, habits, diary. Proposes structural fixes.
-//!   Companion  reads the diary. Answers in prose.
+//! ui: tui: ratatui.
 //!
-//! Diary is the front door: lines with `todo:`, `finished X`, `smoked N`,
-//! or `HH:MM-HH:MM Title` become intents the Curator turns into questions.
 //!
-//!   dortyuzlu                 TUI + panel on :3000 (foreground)
-//!   dortyuzlu --no-panel      TUI only
-//!   dortyuzlu --no-tui        panel only (foreground)
-//!   dortyuzlu --headless      panel only (daemonized)
-//!   dortyuzlu --status        is a headless daemon running?
-//!   dortyuzlu --stop          stop a headless daemon
-//!
-//! DIARY OPENERS (the first layer of the intent parser: a table, not code)
-//!   todo: buy milk @quick #errands        asks to add the todo (tags and group are kept)
-//!   finished laundry / done .. / did ..   asks to mark the matching open todo done
-//!   14:00-15:30 Dentist                   asks to put it in the agenda
-//!   smoked 3                              asks to count 3 on the matching habit
-//! To teach it a new opener, add a row to OPENERS. Every question waits for your yes or
-//! no. A question whose reason has gone (you did the thing by hand) is withdrawn and is
-//! never acted on.
 
 #![recursion_limit = "512"]
 
 mod activity;
 mod panel;
 
+mod clock;
+
+pub(crate) use clock::*;
 use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::fs;
@@ -37,7 +21,7 @@ use std::process::ExitCode;
 use std::rc::Rc;
 use std::time::{Duration, Instant};
 
-use chrono::{Datelike, Local, Months, NaiveDate, NaiveDateTime, NaiveTime, Timelike};
+use chrono::{Datelike, Local, Months, NaiveDate, NaiveDateTime, Timelike};
 use ratatui::{
     crossterm::event::{self, Event as TermEvent, KeyCode, KeyEventKind, KeyModifiers},
     layout::{Constraint, Layout, Rect},
@@ -52,51 +36,6 @@ use serde::{de::DeserializeOwned, Deserialize, Serialize};
 // 1. SMALL HELPERS
 // ===========================================================================
 
-const DATE_FMT: &str = "%Y-%m-%d";
-
-fn today() -> NaiveDate {
-    Local::now().date_naive()
-}
-fn today_text() -> String {
-    today().format(DATE_FMT).to_string()
-}
-fn parse_date(text: &str) -> Option<NaiveDate> {
-    NaiveDate::parse_from_str(text.trim(), DATE_FMT).ok()
-}
-fn minutes_of(text: &str) -> Option<u32> {
-    NaiveTime::parse_from_str(text.trim(), "%H:%M")
-        .ok()
-        .map(|t| t.hour() * 60 + t.minute())
-}
-fn clock(minutes: u32) -> String {
-    format!("{:02}:{:02}", minutes / 60 % 24, minutes % 60)
-}
-fn day_heading(date: NaiveDate) -> String {
-    let t = today();
-    let relative = if date == t {
-        " · today"
-    } else if t.succ_opt() == Some(date) {
-        " · tomorrow"
-    } else if t.pred_opt() == Some(date) {
-        " · yesterday"
-    } else {
-        ""
-    };
-    format!("{}{}", date.format("%a %d %b"), relative)
-}
-fn span_on(from: NaiveDate, start: u32, len: u32, on: NaiveDate) -> Option<(u32, u32)> {
-    let a = (on - from).num_days() * 1440;
-    if a < 0 {
-        return None;
-    }
-    let lo = (start as i64).max(a);
-    let hi = ((start + len) as i64).min(a + 1440);
-    if lo >= hi {
-        None
-    } else {
-        Some(((lo - a) as u32, (hi - a) as u32))
-    }
-}
 fn desc_key(key: &str) -> String {
     key.chars()
         .map(|c| match c.to_digit(10) {
@@ -964,17 +903,6 @@ impl Todo {
         let start = NaiveDateTime::parse_from_str(&self.slot, "%Y-%m-%d %H:%M").ok()?;
         Some(start + chrono::Duration::minutes(self.length() as i64))
     }
-}
-
-fn parse_when(text: &str) -> Result<String, String> {
-    let text = text.trim();
-    let bad = || "Use HH:MM (today) or YYYY-MM-DD HH:MM.".to_string();
-    let (date, time) = match text.split_once(' ') {
-        Some((d, t)) => (parse_date(d).ok_or_else(bad)?, t),
-        None => (today(), text),
-    };
-    let minutes = minutes_of(time).ok_or_else(bad)?;
-    Ok(format!("{} {}", date.format(DATE_FMT), clock(minutes)))
 }
 
 const TODO_VIEWS: &[&str] = &[
@@ -4657,15 +4585,6 @@ mod tests {
 
     fn d(text: &str) -> NaiveDate {
         parse_date(text).expect("test date")
-    }
-
-    #[test]
-    fn spans_cross_midnight() {
-        let from = d("2026-10-24");
-        assert_eq!(span_on(from, 23 * 60, 420, from), Some((1380, 1440)));
-        assert_eq!(span_on(from, 23 * 60, 420, d("2026-10-25")), Some((0, 360)));
-        assert_eq!(span_on(from, 23 * 60, 420, d("2026-10-26")), None);
-        assert_eq!(span_on(from, 23 * 60, 420, d("2026-10-23")), None);
     }
 
     #[test]
