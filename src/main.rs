@@ -1,6 +1,8 @@
 mod actions;
 mod ai;
 mod app;
+#[allow(dead_code)] // decode is not wired into the app yet; remove this once it is
+mod decode;
 mod domain;
 mod events;
 mod mod_daily;
